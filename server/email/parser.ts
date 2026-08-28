@@ -27,7 +27,7 @@ export interface ParsedOrderEmail {
 }
 
 export interface EmailParseContext {
-  /** Existing order IDs from this customer's mailbox used for cancellation matching. */
+  /** Existing order numbers from this customer's mailbox used for cancellation matching. */
   knownOrderNumbers?: readonly string[];
 }
 
@@ -188,7 +188,7 @@ function normalizeOrderNumber(value: string | undefined): string | null {
   if (!value) return null;
   const normalized = value.trim().toUpperCase();
   if (normalized.length < 5
-    || /^(?:ORDER|PURCHASE|NUMBER|CONFIRM(?:ED|ATION)?|CANCEL(?:LED|ED|LATION)?|REFUND(?:ED)?|WAS|HAS|BEEN|SHIPPED|DELIVERED|PROCESSING|IS|NOW|YOUR|THE|THIS|THAT|FOR|FROM|WITH|ASSOCIATED|REQUEST|COMPLETE|COMPLETED)$/.test(normalized)) return null;
+    || /^(?:ORDER|PURCHASE|NUMBER|CONFIRM(?:ED|ATION)?|CANCEL(?:LED|ED|LATION)?|REFUND(?:ED)?|WAS|HAS|BEEN|SHIPPED|SHIPPING|DELIVERED|DELIVERY|TRACKING|PACKAGE|SHIPMENT|PROCESSING|IS|NOW|YOUR|THE|THIS|THAT|FOR|FROM|WITH|ASSOCIATED|REQUEST|COMPLETE|COMPLETED)$/.test(normalized)) return null;
   return normalized;
 }
 
