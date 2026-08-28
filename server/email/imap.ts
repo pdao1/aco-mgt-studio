@@ -97,10 +97,23 @@ export class MailboxSyncCoordinator {
         const searched = await client.search({
           gmraw: `after:${after} {order shipped shipment delivered delivery tracking package confirmation purchase}`,
         }, { uid: true });
+        // Cancellation notices were previously ignored. Search the full
+        // configured history on every sync so an already-processed mailbox can
+        // be repaired without resetting its incremental cursor.
+        const cancellationSince = new Date(Date.now() - mailbox.syncDays * 24 * 60 * 60 * 1000);
+        const cancellationAfter = cancellationSince.toISOString().slice(0, 10).replace(/-/g, '/');
         const cancellationSearched = await client.search({
-          gmraw: `after:${after} {cancelled canceled cancellation refund}`,
+          gmraw: `after:${cancellationAfter} {cancelled canceled cancellation refund}`,
         }, { uid: true });
-        const uids = [...new Set([...(searched || []), ...(cancellationSearched || [])])]
+        const cancellationUids = [...new Set(cancellationSearched || [])]
+          .sort((left, right) => left - right)
+          .slice(-this.maxMessages);
+        const regularUids = [...new Set(searched || [])].sort((left, right) => left - right);
+        const remainingCapacity = Math.max(0, this.maxMessages - cancellationUids.length);
+        const uids = [...new Set([
+          ...cancellationUids,
+          ...regularUids.slice(-remainingCapacity),
+        ])]
           .sort((left, right) => left - right)
           .slice(-this.maxMessages);
         if (uids.length > 0) {
