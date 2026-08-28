@@ -94,8 +94,12 @@ export class MailboxSyncCoordinator {
           ? new Date(mailbox.lastSyncedAt.getTime() - 24 * 60 * 60 * 1000)
           : new Date(Date.now() - mailbox.syncDays * 24 * 60 * 60 * 1000);
         const after = since.toISOString().slice(0, 10).replace(/-/g, '/');
+        // Search the bounded customer mailbox window rather than relying on a
+        // subject-keyword allowlist. Retailer cancellation and fulfillment
+        // notices use many different subjects; parsing is the order-related
+        // filter and only durable matches are loaded into the order table.
         const searched = await client.search({
-          gmraw: `after:${after} {order shipped shipment delivered delivery tracking package confirmation purchase}`,
+          gmraw: `after:${after}`,
         }, { uid: true });
         // Cancellation notices were previously ignored. Search the full
         // configured history on every sync so an already-processed mailbox can

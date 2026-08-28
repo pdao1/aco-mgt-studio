@@ -98,6 +98,63 @@ describe('parseOrderEmail', () => {
     });
   });
 
+  it('prefers the customer history order number over another numeric reference', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<historical-match@example>',
+      fromAddress: 'notifications@target.com',
+      fromName: 'Target',
+      subject: 'Your order has been canceled',
+      text: 'Cancellation reference: 9999999999999\nThe purchase associated with 200010763845678 was cancelled.',
+      html: null,
+      receivedAt,
+    }, { knownOrderNumbers: ['200010763845678'] });
+
+    expect(parsed?.orderNumber).toBe('200010763845678');
+    expect(parsed?.status).toBe('cancelled');
+  });
+
+  it('does not create an order from prose after the word order', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<prose@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target Orders',
+      subject: 'Your order confirmation',
+      text: 'Your order is ending soon. Order confirmation is available before the cutoff. Order totaling is shown at checkout.',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed).toBeNull();
+  });
+
+  it('continues past a subject phrase to find an unlabelled order number in the body', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<unlabelled-body@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target Orders',
+      subject: 'Your order is confirmed',
+      text: 'Your order 102003715051916 is confirmed.',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.orderNumber).toBe('102003715051916');
+  });
+
+  it('accepts an order confirmation label without treating the label as the number', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<confirmation-label@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target Orders',
+      subject: 'Your order is confirmed',
+      text: 'Order confirmation: 102003715051916',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.orderNumber).toBe('102003715051916');
+  });
+
   it('extracts a compact item overview from labelled retailer lines', () => {
     const parsed = parseOrderEmail({
       messageId: '<items@example>',

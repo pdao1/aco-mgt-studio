@@ -232,7 +232,11 @@ export class Repository {
           ON i.workspace_id = o.workspace_id AND i.id = o.billing_invoice_id
         LEFT JOIN shipments s
           ON s.workspace_id = o.workspace_id AND s.customer_id = o.customer_id AND s.order_id = o.id
+        -- Order identifiers accepted by the parser contain at least one
+        -- digit. Keep legacy prose artifacts out of operator/customer views
+        -- without deleting historical rows.
         WHERE o.workspace_id = $1
+          AND o.order_number ~ '[0-9]'
         ORDER BY o.ordered_at DESC
         LIMIT 2000
       `, [workspaceId]);
@@ -523,6 +527,7 @@ export class Repository {
         WHERE o.workspace_id = $1
           AND o.customer_id = $2
           AND o.id = ANY($3::uuid[])
+          AND o.order_number ~ '[0-9]'
           AND o.billing_invoice_id IS NULL
           AND COALESCE(o.status_override, o.status) <> 'cancelled'
           AND (o.total_cents IS NOT NULL OR (o.fee_basis = 'custom_amount' AND o.custom_fee_basis_cents IS NOT NULL))
@@ -838,7 +843,7 @@ export class Repository {
       const result = await client.query<{ order_number: string }>(`
         SELECT order_number
         FROM orders
-        WHERE workspace_id = $1 AND customer_id = $2
+        WHERE workspace_id = $1 AND customer_id = $2 AND order_number ~ '[0-9]'
         ORDER BY updated_at DESC
         LIMIT 10000
       `, [workspaceId, customerId]);
@@ -907,11 +912,11 @@ export class Repository {
       if (!parsed) return false;
 
       // A full-history sync may revisit a message that was already marked as
-      // processed before item extraction existed. Reprocess only when the
-      // message now contains useful order details so the new item overview
-      // can be backfilled without duplicating ordinary messages.
-      if (processed.rowCount === 0
-        && (parsed.items.length === 0 || (!parsed.orderNumber && !parsed.trackingNumber))) return false;
+      // processed before parser rules were corrected. Reprocess identified
+      // orders so historical matching, cancellation state, and newly parsed
+      // fields can repair the existing customer-scoped row. Unidentified
+      // messages remain idempotently skipped.
+      if (processed.rowCount === 0 && !parsed.orderNumber && !parsed.trackingNumber) return false;
 
       let orderId: string | null = null;
       if (parsed.orderNumber) {

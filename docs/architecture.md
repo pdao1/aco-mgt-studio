@@ -21,7 +21,7 @@ Stripe/Venmo payment links when configured.
 | Notifications | Optional SMTP delivery is queued outside request handlers for invoice-created (buyer) and invoice-paid (buyer + seller) notices. |
 | Order detail | Parsed line items are stored as bounded JSON on the customer-scoped order and rendered in both the operator inspector and customer portal detail view. |
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
-| Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It searches order/shipment mail plus cancellation/refund notices, matches known customer order numbers, and applies cancellation events idempotently. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
+| Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
 | AI | Deterministic parsing runs first. The optional enrichment provider receives only a redacted, bounded excerpt and must return data that the workflow validates before loading. No model is enabled by default. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
 

@@ -36,12 +36,13 @@ export interface ParsedOrderItem {
 }
 
 export interface EmailParseContext {
-  /** Existing order numbers from this customer's mailbox used for cancellation matching. */
+  /** Existing order numbers from this customer used for historical matching. */
   knownOrderNumbers?: readonly string[];
 }
 
 const orderPatterns = [
   /(?:order|purchase)\s*(?:number|no\.?|#|id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /(?:order|purchase)\s+confirmation\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
   /confirmation\s*(?:number|no\.?|#|id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
   /(?:order|purchase)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
   /(?:order|purchase)\s+(?:was|has\s+been|is(?:\s+now)?)\s+(?:cancelled|canceled)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
@@ -74,7 +75,11 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
   if (!looksOrderRelated(plain)) return null;
 
   const status = parseStatus(input.subject, plain);
-  const orderNumber = firstOrderNumber(plain) ?? findKnownOrderNumber(plain, context.knownOrderNumbers ?? []);
+  // Prefer an exact customer-history match over a newly guessed token. This
+  // is what lets a cancellation/shipment notice from a different retailer
+  // sender update the existing order instead of creating a second row.
+  const historicalOrderNumber = findKnownOrderNumber(plain, context.knownOrderNumbers ?? []);
+  const orderNumber = historicalOrderNumber ?? firstOrderNumber(plain);
   const tracking = findTracking(plain);
   const items = parseItems(plain);
   const messageKey = input.messageId?.trim() || createHash('sha256')
@@ -103,6 +108,8 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
 function looksOrderRelated(text: string): boolean {
   const signals = [
     /\border (?:confirmed|confirmation|number|#|has shipped|is on the way)\b/i,
+    /\b(?:order|purchase|confirmation)\s*(?:number|no\.?|#|id)\b/i,
+    /\b(?:order|purchase)\s*[:#-]?\s*[A-Z0-9][A-Z0-9-]{4,}\b/i,
     /\btracking (?:number|#|information|details)\b/i,
     /\b(?:shipment|package) (?:has shipped|is on the way|was delivered|delivered)\b/i,
     /\bthanks? for your (?:order|purchase)\b/i,
@@ -278,9 +285,11 @@ function findTrackingUrl(value: string): string | null {
 
 function firstOrderNumber(value: string): string | null {
   for (const pattern of orderPatterns) {
-    const match = value.match(pattern);
-    const candidate = normalizeOrderNumber(match?.[1]);
-    if (candidate) return candidate;
+    const globalPattern = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+    for (const match of value.matchAll(globalPattern)) {
+      const candidate = normalizeOrderNumber(match[1]);
+      if (candidate) return candidate;
+    }
   }
   return null;
 }
@@ -299,6 +308,10 @@ function normalizeOrderNumber(value: string | undefined): string | null {
   if (!value) return null;
   const normalized = value.trim().toUpperCase();
   if (normalized.length < 5
+    // An order identifier must contain a digit. Without this guard, prose
+    // such as "order confirmation", "order ending", and "order cutoff"
+    // becomes a fabricated order row.
+    || !/\d/.test(normalized)
     || /^(?:ORDER|PURCHASE|NUMBER|CONFIRM(?:ED|ATION)?|CANCEL(?:LED|ED|LATION)?|REFUND(?:ED)?|WAS|HAS|BEEN|SHIPPED|SHIPPING|DELIVERED|DELIVERY|TRACKING|PACKAGE|SHIPMENT|PROCESSING|IS|NOW|YOUR|THE|THIS|THAT|FOR|FROM|WITH|ASSOCIATED|REQUEST|COMPLETE|COMPLETED)$/.test(normalized)) return null;
   return normalized;
 }
