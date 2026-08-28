@@ -1426,9 +1426,12 @@ tr:focus-visible {
 }
 .overview-attention-row:last-child { border-bottom: 0; }
 .overview-attention-row:hover { background: #fafcff; }
+.overview-attention-row:focus-visible { outline: 2px solid rgb(20 99 243 / 55%); outline-offset: -2px; }
 .overview-order-copy { display: flex; flex-direction: column; min-width: 0; }
 .overview-order-copy strong { overflow: hidden; color: #263148; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .overview-order-copy small { margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.overview-customer-link { width: fit-content; max-width: 100%; margin-top: 5px; padding: 0; overflow: hidden; color: var(--blue); background: transparent; font-size: 10px; text-align: left; text-decoration: underline; text-decoration-color: rgb(20 99 243 / 28%); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.overview-customer-link:hover { text-decoration-color: currentColor; }
 .overview-order-total { color: #27344a; font-size: 12px; font-weight: 650; white-space: nowrap; }
 .overview-empty,
 .billing-empty-row {
@@ -2308,7 +2311,7 @@ tr:focus-visible {
   .overview-metric:nth-child(-n + 3) { border-bottom: 1px solid var(--line); }
   .billing-metrics { grid-template-columns: repeat(3, minmax(170px, 1fr)); overflow-x: auto; }
   .billing-metric { min-width: 170px; }
-  .inspector { width: min(390px, calc(100vw - 28px)); }
+  .inspector { inset: 62px 0 0 auto; width: min(390px, calc(100vw - 28px)); height: auto; max-height: none; }
 
   .portal-main { padding: 30px 20px 40px; }
   .portal-header { padding: 0 20px; }

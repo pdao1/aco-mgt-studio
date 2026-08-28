@@ -28,9 +28,7 @@ export function OverviewView({ customers, orders, onOpenCustomer }: OverviewView
       <header className="overview-header">
         <div>
           <h1>Overview</h1>
-          <p>Keep customer orders, exceptions, and charges in one place.</p>
         </div>
-        <span className="overview-live-note"><span className="sync-dot synced" /> Live workspace data</span>
       </header>
 
       <section className="overview-metrics" aria-label="Workspace totals">
@@ -53,12 +51,35 @@ export function OverviewView({ customers, orders, onOpenCustomer }: OverviewView
             {attentionOrders.map((order) => {
               const customer = customers.find((candidate) => candidate.id === order.customerId);
               return (
-                <button className="overview-attention-row" key={order.id} onClick={() => onOpenCustomer(order.customerId, order.id)}>
+                <div
+                  className="overview-attention-row"
+                  key={order.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenCustomer(order.customerId, order.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') onOpenCustomer(order.customerId, order.id);
+                  }}
+                >
                   <StoreMark store={order.store} />
-                  <span className="overview-order-copy"><strong>{order.store} · {order.orderNumber}</strong><small>{customer?.name ?? 'Customer'} · {order.overrideNote || 'Review order status'}</small></span>
+                  <span className="overview-order-copy">
+                    <strong>{order.store} · {order.orderNumber}</strong>
+                    <button
+                      type="button"
+                      className="overview-customer-link"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenCustomer(order.customerId);
+                      }}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      {customer?.name ?? 'Customer'}
+                    </button>
+                    <small>{order.overrideNote || 'Review order status'}</small>
+                  </span>
                   <span className={`status-label ${order.status}`}>{titleCaseStatus(order.status)}</span>
                   <span className="overview-order-total" title="Service fee">{formatMoney(order.feeCents, order.currency)}</span>
-                </button>
+                </div>
               );
             })}
           </div>
