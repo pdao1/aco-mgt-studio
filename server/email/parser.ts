@@ -26,8 +26,18 @@ export interface ParsedOrderEmail {
   orderedAt: Date;
 }
 
+export interface EmailParseContext {
+  /** Existing order IDs from this customer's mailbox used for cancellation matching. */
+  knownOrderNumbers?: readonly string[];
+}
+
 const orderPatterns = [
-  /(?:order|confirmation)\s*(?:number|no\.?|#|id)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /(?:order|purchase)\s*(?:number|no\.?|#|id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /confirmation\s*(?:number|no\.?|#|id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /(?:order|purchase)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /(?:order|purchase)\s+(?:was|has\s+been|is(?:\s+now)?)\s+(?:cancelled|canceled)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /(?:order|purchase)\s+(?:cancellation|cancelled|canceled)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
+  /(?:cancellation|cancelled|canceled|refund(?:ed)?)[^\r\n]{0,100}?\b(?:order|purchase)\s*(?:number|no\.?|#|id)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
   /(?:your\s+order\s+)([A-Z0-9][A-Z0-9-]{4,})/i,
 ];
 
@@ -50,12 +60,12 @@ const merchantAliases: Array<[RegExp, string]> = [
   [/(?:^|\.)supremenewyork\./i, 'Supreme'],
 ];
 
-export function parseOrderEmail(input: EmailInput): ParsedOrderEmail | null {
+export function parseOrderEmail(input: EmailInput, context: EmailParseContext = {}): ParsedOrderEmail | null {
   const plain = normalizeText(`${input.subject}\n${input.text}\n${stripHtml(input.html ?? '')}`);
   if (!looksOrderRelated(plain)) return null;
 
   const status = parseStatus(input.subject, plain);
-  const orderNumber = firstCapture(plain, orderPatterns)?.toUpperCase() ?? null;
+  const orderNumber = firstOrderNumber(plain) ?? findKnownOrderNumber(plain, context.knownOrderNumbers ?? []);
   const tracking = findTracking(plain);
   const messageKey = input.messageId?.trim() || createHash('sha256')
     .update(`${input.fromAddress}\0${input.subject}\0${input.receivedAt.toISOString()}\0${plain.slice(0, 2000)}`)
@@ -85,13 +95,18 @@ function looksOrderRelated(text: string): boolean {
     /\b(?:shipment|package) (?:has shipped|is on the way|was delivered|delivered)\b/i,
     /\bthanks? for your (?:order|purchase)\b/i,
     /\bexpected delivery\b/i,
+    /\b(?:order|purchase|shipment|item)\b[\s\S]{0,100}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i,
+    /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[\s\S]{0,100}\b(?:order|purchase|shipment|item)\b/i,
+    /\b(?:cancelled|canceled|cancellation)\b/i,
   ];
   return signals.some((signal) => signal.test(text));
 }
 
 function parseStatus(subject: string, text: string): ParsedOrderStatus {
   const normalizedSubject = subject.toLowerCase();
-  if (/cancelled|canceled|refund(?:ed)?/.test(normalizedSubject) || /\border (?:was |has been )?cancelled\b/i.test(text)) return 'cancelled';
+  if (/cancelled|canceled|cancellation|refund(?:ed)?/.test(normalizedSubject)
+    || /\b(?:order|purchase|shipment|item)\b[\s\S]{0,100}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(text)
+    || /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[\s\S]{0,100}\b(?:order|purchase|shipment|item)\b/i.test(text)) return 'cancelled';
   if (/delivered/.test(normalizedSubject) || /\b(?:package|order|shipment) (?:was |has been )?delivered\b/i.test(text)) return 'delivered';
   if (/shipped|on the way|in transit|out for delivery/.test(normalizedSubject) || /\b(?:has shipped|shipped via|tracking number)\b/i.test(text)) return 'shipped';
   if (/processing|preparing|getting your order ready/.test(normalizedSubject) || /\bpreparing (?:your )?(?:order|shipment)\b/i.test(text)) return 'processing';
@@ -150,12 +165,35 @@ function findTrackingUrl(value: string): string | null {
   return urls.find((url) => /ups\.com|fedex\.com|usps\.com|dhl\.com|track(?:ing)?/i.test(url))?.replace(/&amp;/g, '&') ?? null;
 }
 
-function firstCapture(value: string, patterns: RegExp[]): string | null {
-  for (const pattern of patterns) {
+function firstOrderNumber(value: string): string | null {
+  for (const pattern of orderPatterns) {
     const match = value.match(pattern);
-    if (match?.[1]) return match[1];
+    const candidate = normalizeOrderNumber(match?.[1]);
+    if (candidate) return candidate;
   }
   return null;
+}
+
+function findKnownOrderNumber(value: string, knownOrderNumbers: readonly string[]): string | null {
+  const candidates = [...new Set(knownOrderNumbers.map(normalizeOrderNumber).filter((candidate): candidate is string => Boolean(candidate)))]
+    .sort((left, right) => right.length - left.length);
+  for (const candidate of candidates) {
+    const pattern = new RegExp(`(?<![A-Z0-9])${escapeRegExp(candidate)}(?![A-Z0-9])`, 'i');
+    if (pattern.test(value)) return candidate;
+  }
+  return null;
+}
+
+function normalizeOrderNumber(value: string | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase();
+  if (normalized.length < 5
+    || /^(?:ORDER|PURCHASE|NUMBER|CONFIRM(?:ED|ATION)?|CANCEL(?:LED|ED|LATION)?|REFUND(?:ED)?|WAS|HAS|BEEN|SHIPPED|DELIVERED|PROCESSING|IS|NOW|YOUR|THE|THIS|THAT|FOR|FROM|WITH|ASSOCIATED|REQUEST|COMPLETE|COMPLETED)$/.test(normalized)) return null;
+  return normalized;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function stripHtml(html: string): string {

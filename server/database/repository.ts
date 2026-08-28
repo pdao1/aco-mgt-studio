@@ -831,6 +831,19 @@ export class Repository {
     });
   }
 
+  async listOrderNumbers(workspaceId: string, customerId: string): Promise<string[]> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{ order_number: string }>(`
+        SELECT order_number
+        FROM orders
+        WHERE workspace_id = $1 AND customer_id = $2
+        ORDER BY updated_at DESC
+        LIMIT 10000
+      `, [workspaceId, customerId]);
+      return result.rows.map((row) => row.order_number);
+    });
+  }
+
   async beginSync(workspaceId: string, customerId: string): Promise<string> {
     return this.withWorkspace(workspaceId, async (client) => {
       const runId = randomUUID();
@@ -892,7 +905,17 @@ export class Repository {
       if (processed.rowCount === 0 || !parsed) return false;
 
       let orderId: string | null = null;
-      if (!parsed.orderNumber && parsed.trackingNumber) {
+      if (parsed.orderNumber) {
+        const existing = await client.query<{ id: string }>(`
+          SELECT id
+          FROM orders
+          WHERE workspace_id = $1 AND customer_id = $2 AND order_number = $3
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `, [workspaceId, customerId, parsed.orderNumber]);
+        orderId = existing.rows[0]?.id ?? null;
+      }
+      if (!orderId && !parsed.orderNumber && parsed.trackingNumber) {
         const tracked = await client.query<{ order_id: string }>(`
           SELECT order_id FROM shipments
           WHERE workspace_id = $1 AND customer_id = $2 AND tracking_number = $3

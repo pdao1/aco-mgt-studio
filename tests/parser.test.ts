@@ -64,6 +64,40 @@ describe('parseOrderEmail', () => {
     });
   });
 
+  it('recognizes cancellation notices and extracts the order number after the cancellation wording', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<cancelled@example>',
+      fromAddress: 'support@retailer.example',
+      fromName: 'Retailer Support',
+      subject: 'Cancellation confirmation',
+      text: 'Your order was canceled - R-847201. No payment was captured.',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed).toMatchObject({
+      orderNumber: 'R-847201',
+      status: 'cancelled',
+    });
+  });
+
+  it('matches a cancellation email against a known order number when the notice omits an order label', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<cancelled-without-label@example>',
+      fromAddress: 'notifications@retailer.example',
+      fromName: 'Retailer',
+      subject: 'Your cancellation is complete',
+      text: 'The purchase associated with 200010763845678 was cancelled at your request.',
+      html: null,
+      receivedAt,
+    }, { knownOrderNumbers: ['200010763845678'] });
+
+    expect(parsed).toMatchObject({
+      orderNumber: '200010763845678',
+      status: 'cancelled',
+    });
+  });
+
   it('only treats long numeric values as FedEx tracking when tracking context is present', () => {
     const parsed = parseOrderEmail({
       messageId: '<fedex@example>',

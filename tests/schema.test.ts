@@ -67,4 +67,10 @@ describe('PostgreSQL tenant and privacy schema', () => {
     expect(sql).toContain('ALTER TABLE workspace_settings FORCE ROW LEVEL SECURITY;');
     expect(sql).toContain("venmo_payment_url text");
   });
+
+  it('adds a customer-scoped order-number lookup index for cancellation matching', async () => {
+    const sql = await readFile(new URL('../server/database/migrations/006_cancellation_matching.sql', import.meta.url), 'utf8');
+    expect(sql).toContain('orders_customer_order_number_idx');
+    expect(sql).toContain('ON orders(workspace_id, customer_id, order_number)');
+  });
 });

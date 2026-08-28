@@ -20,7 +20,7 @@ Stripe/Venmo payment links when configured.
 | Access | A server-side `SERVICE_SERIAL` unlocks a signed, HttpOnly access cookie. Operator sessions remain separate and are still required. |
 | Notifications | Optional SMTP delivery is queued outside request handlers for invoice-created (buyer) and invoice-paid (buyer + seller) notices. |
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
-| Async work | `MailboxSyncCoordinator` is a bounded background consumer today. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
+| Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It searches order/shipment mail plus cancellation/refund notices, matches known customer order numbers, and applies cancellation events idempotently. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
 | AI | Deterministic parsing runs first. The optional enrichment provider receives only a redacted, bounded excerpt and must return data that the workflow validates before loading. No model is enabled by default. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
 

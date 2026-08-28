@@ -80,6 +80,7 @@ export class MailboxSyncCoordinator {
     const runId = await this.repository.beginSync(this.workspaceId, customerId);
     let scanned = 0;
     let matched = 0;
+    const knownOrderNumbers = new Set(await this.repository.listOrderNumbers(this.workspaceId, customerId));
     const client = createClient(mailbox.gmailAddress, this.secretBox.decrypt(mailbox.secretCiphertext));
 
     try {
@@ -96,7 +97,12 @@ export class MailboxSyncCoordinator {
         const searched = await client.search({
           gmraw: `after:${after} {order shipped shipment delivered delivery tracking package confirmation purchase}`,
         }, { uid: true });
-        const uids = (searched || []).slice(-this.maxMessages);
+        const cancellationSearched = await client.search({
+          gmraw: `after:${after} {cancelled canceled cancellation refund}`,
+        }, { uid: true });
+        const uids = [...new Set([...(searched || []), ...(cancellationSearched || [])])]
+          .sort((left, right) => left - right)
+          .slice(-this.maxMessages);
         if (uids.length > 0) {
           for await (const message of client.fetch(uids, { envelope: true, internalDate: true, source: true }, { uid: true })) {
             scanned += 1;
@@ -126,6 +132,7 @@ export class MailboxSyncCoordinator {
             const messageKey = parsedMail.messageId || message.envelope?.messageId || createHash('sha256')
               .update(message.source)
               .digest('hex');
+            const parsedOrder = parseOrderEmail(email, { knownOrderNumbers: [...knownOrderNumbers] });
             const result = await runOrderIngestion(this.workspaceId, customerId, email, {
               messageKey,
               fromAddress,
@@ -133,8 +140,9 @@ export class MailboxSyncCoordinator {
               receivedAt,
             }, {
               repository: this.repository,
-              parse: parseOrderEmail,
+              parse: () => parsedOrder,
             });
+            if (parsedOrder?.orderNumber) knownOrderNumbers.add(parsedOrder.orderNumber);
             if (result.matched) matched += 1;
           }
         }

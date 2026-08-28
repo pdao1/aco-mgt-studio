@@ -16,6 +16,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - Per-order fee percentages (0–100%, stored as integer basis points) calculated from either the checkout purchase total or a custom amount such as expected sale value or profit.
 - Draft invoices snapshot selected service fees, preserve the purchase and fee basis as informational references, and lock fee edits after issue. Stripe Invoicing charges only ACO service fees; signed webhooks update paid/open/void states idempotently.
 - Manual status overrides are stored separately from parsed email state and are visible in the customer timeline and portal.
+- Mailbox sync searches cancellation/refund notices as well as order and shipment mail. It matches cancellation order numbers against the customer's existing orders before applying a cancellation, so different retailer sender addresses do not create duplicate cancelled orders.
 - A beta serial gate protects the operator surface. The serial is server-side (`SERVICE_SERIAL`) and unlocks a signed, HttpOnly access cookie; it is never shipped to the browser.
 - `/` is the public marketing site, `/app/dashboard` is the operator app, and `/app/admin/super` is reserved for the service owner.
 - Each workspace can set its customer-facing name, HTTPS logo, accent color, seller notification email, and Venmo payment URL. SMTP invoice notifications are optional and disabled until configured.
