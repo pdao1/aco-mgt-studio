@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export type ParsedOrderStatus = 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+export type ParsedOrderStatus = 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
 export interface EmailInput {
   messageId: string | null;
@@ -133,7 +133,14 @@ function parseStatus(subject: string, text: string): ParsedOrderStatus {
   if (/delivered/.test(normalizedSubject) || /\b(?:package|order|shipment) (?:was |has been )?delivered\b/i.test(text)) return 'delivered';
   if (/shipped|on the way|in transit|out for delivery/.test(normalizedSubject) || /\b(?:has shipped|shipped via|tracking number)\b/i.test(text)) return 'shipped';
   if (/processing|preparing|getting your order ready/.test(normalizedSubject) || /\bpreparing (?:your )?(?:order|shipment)\b/i.test(text)) return 'processing';
-  return 'confirmed';
+  // A generic order acknowledgement is not proof that the retailer accepted
+  // the order. Keep it pending until a matching confirmation message arrives.
+  // The explicit confirmation check is intentionally narrow so phrases such
+  // as "confirmation link" or "order information" do not promote an order.
+  if (/\border\s+(?:confirmation|confirmed)\b|\b(?:order|purchase)\s+(?:is|was|has\s+been)\s+confirmed\b|\bconfirmation\s+(?:number|#|id)\b/i.test(`${subject}\n${text}`)) {
+    return 'confirmed';
+  }
+  return 'pending';
 }
 
 function findTracking(text: string) {
@@ -300,9 +307,14 @@ function isNarrativeLine(value: string): boolean {
 }
 
 function isNonProductLine(value: string): boolean {
-  return /^(?:more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?|(?:video\s+)?games?|toys?(?:\s*&\s*games)?|shop\s+now|view\s+(?:order|cart)|order\s+summary)$/i.test(value.trim())
+  return /^(?:more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?|(?:video\s+)?games?|toys?(?:\s*&\s*games)?|shop\s+now|view\s+(?:order|cart|details?)(?:\s+(?:order|cart|details?))?|order\s+details|order\s+summary|cancel(?:led|ed)\s+item)$/i.test(value.trim())
     || /(?:item\s+border|border\s+item|background-color|font-size|padding-top)/i.test(value)
-    || /^(?:border|background|padding|margin|font|color|display|width|height)\b/i.test(value.trim());
+    || /^(?:border|background|padding|margin|font|color|display|width|height)\b/i.test(value.trim())
+    // Links and query-string fragments are navigation/analytics content, not
+    // merchandise. Reject them before quantity look-ahead can turn them into
+    // a fake product row (for example Target's click.oe.target.com links).
+    || /https?:\/\/|www\.|\b(?:href|qs)=/i.test(value)
+    || /(?:click\.oe\.target\.com|[?&][a-z0-9_-]+=)/i.test(value);
 }
 
 function hasItemEvidence(value: string): boolean {

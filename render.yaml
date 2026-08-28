@@ -50,6 +50,26 @@ services:
         value: gpt-5-nano
       - key: OPENAI_MAX_REVIEWS_PER_SYNC
         value: "25"
+      - key: USPS_CLIENT_ID
+        sync: false
+      - key: USPS_CLIENT_SECRET
+        sync: false
+      - key: UPS_CLIENT_ID
+        sync: false
+      - key: UPS_CLIENT_SECRET
+        sync: false
+      - key: UPS_TRANSACTION_SRC
+        value: aco-studio
+      - key: FEDEX_API_KEY
+        sync: false
+      - key: FEDEX_SECRET_KEY
+        sync: false
+      - key: FEDEX_ACCOUNT_NUMBER
+        sync: false
+      - key: TRACKING_SYNC_INTERVAL_MINUTES
+        value: "30"
+      - key: TRACKING_MAX_SHIPMENTS_PER_SYNC
+        value: "100"
       - key: OPERATOR_PASSWORD
         sync: false
       - key: APP_ORIGIN

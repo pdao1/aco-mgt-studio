@@ -46,7 +46,7 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<ParsedOrderEmail>;
   if (typeof candidate.merchant !== 'string' || candidate.merchant.trim().length < 2) return null;
-  if (!candidate.status || !['confirmed', 'processing', 'shipped', 'delivered', 'cancelled'].includes(candidate.status)) return null;
+  if (!candidate.status || !['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'].includes(candidate.status)) return null;
   if (candidate.orderNumber !== null && candidate.orderNumber !== undefined && typeof candidate.orderNumber !== 'string') return null;
   if (candidate.trackingNumber !== null && candidate.trackingNumber !== undefined && typeof candidate.trackingNumber !== 'string') return null;
   if (candidate.totalCents !== null && candidate.totalCents !== undefined && (!Number.isInteger(candidate.totalCents) || candidate.totalCents < 0)) return null;

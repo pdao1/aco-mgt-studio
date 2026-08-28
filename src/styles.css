@@ -842,6 +842,7 @@ tr:focus-visible {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px !important;
 }
+.order-tracking-inline { display: block; margin-top: 3px; color: #7c8798; font-family: inherit; font-size: 9px; font-weight: 500; }
 
 .status-label {
   display: inline-flex;
@@ -858,6 +859,7 @@ tr:focus-visible {
 .status-label.shipped { color: #0957c7; background: #e6f0ff; }
 .status-label.delivered { color: #087150; background: var(--green-bg); }
 .status-label.confirmed { color: #9a5800; background: var(--amber-bg); }
+.status-label.pending { color: #6f5a00; background: #fff7d6; }
 .status-label.cancelled { color: #b52635; background: var(--red-bg); }
 
 .orders-table a,
@@ -2070,10 +2072,12 @@ tr:focus-visible {
 .portal-store-cell > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .portal-store-cell .store-mark { width: 29px; height: 29px; flex-basis: 29px; }
 .portal-order-number { color: #344a40 !important; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px !important; }
+.portal-order-tracking-inline { display: block; margin-top: 3px; color: #7f9185; font-family: inherit; font-size: 9px; font-weight: 500; }
 .portal-fee-cell { display: inline-flex; align-items: baseline; gap: 4px; }
 .portal-fee-cell small { color: #85938a; font-size: 9px; }
 .portal-status { display: inline-flex; align-items: center; min-height: 23px; padding: 0 7px; border-radius: 4px; color: #5d6c63; background: #eef1ed; font-size: 10px; font-weight: 700; }
 .portal-status.confirmed { color: #8b5a16; background: #f7eedc; }
+.portal-status.pending { color: #6f5a00; background: #fff7d6; }
 .portal-status.processing { color: #8b5a16; background: #f7eedc; }
 .portal-status.shipped { color: #1b6447; background: #e3f0e1; }
 .portal-status.delivered { color: #126244; background: #e0efe3; }

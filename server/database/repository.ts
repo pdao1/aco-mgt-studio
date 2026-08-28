@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import pg, { type PoolClient } from 'pg';
 import type { ParsedOrderEmail, ParsedOrderItem, ParsedOrderStatus } from '../email/parser.js';
 import { SecretBox } from '../security/secret-box.js';
+import type { TrackingSnapshot } from '../tracking/providers.js';
 
 const { Pool } = pg;
 
@@ -98,6 +99,16 @@ export interface CustomerBillingProfile {
   name: string;
   gmailAddress: string;
   stripeCustomerId: string | null;
+}
+
+export interface ActiveShipmentRecord {
+  id: string;
+  customerId: string;
+  orderId: string;
+  carrier: string | null;
+  trackingNumber: string;
+  trackingUrl: string | null;
+  status: ParsedOrderStatus;
 }
 
 export class BillingValidationError extends Error {
@@ -353,6 +364,88 @@ export class Repository {
       orders: payload.orders.filter((order) => order.customerId === customerId),
       invoices: billing.invoices.map((invoice) => ({ ...invoice, lastError: null })),
     };
+  }
+
+  async listActiveShipments(workspaceId: string, limit = 100): Promise<ActiveShipmentRecord[]> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{
+        id: string;
+        customer_id: string;
+        order_id: string;
+        carrier: string | null;
+        tracking_number: string;
+        tracking_url: string | null;
+        status: ParsedOrderStatus;
+      }>(`
+        SELECT id, customer_id, order_id, carrier, tracking_number, tracking_url, status
+        FROM shipments
+        WHERE workspace_id = $1
+          AND tracking_number IS NOT NULL
+          AND status NOT IN ('delivered', 'cancelled')
+        ORDER BY updated_at ASC
+        LIMIT $2
+      `, [workspaceId, Math.max(1, Math.min(1000, Math.floor(limit)))]);
+      return result.rows.map((row) => ({
+        id: row.id,
+        customerId: row.customer_id,
+        orderId: row.order_id,
+        carrier: row.carrier,
+        trackingNumber: row.tracking_number,
+        trackingUrl: row.tracking_url,
+        status: row.status,
+      }));
+    });
+  }
+
+  async updateShipmentFromCarrier(
+    workspaceId: string,
+    shipment: ActiveShipmentRecord,
+    snapshot: TrackingSnapshot,
+  ): Promise<boolean> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const updatedShipment = await client.query<{ order_id: string }>(`
+        UPDATE shipments
+        SET carrier = COALESCE($5, carrier),
+            tracking_url = COALESCE($6, tracking_url),
+            status = CASE WHEN status_rank($7) >= status_rank(status) THEN $7 ELSE status END,
+            expected_delivery = COALESCE($8, expected_delivery),
+            delivered_at = COALESCE($9, delivered_at),
+            updated_at = now()
+        WHERE workspace_id = $1 AND customer_id = $2 AND order_id = $3 AND id = $4
+        RETURNING order_id
+      `, [
+        workspaceId,
+        shipment.customerId,
+        shipment.orderId,
+        shipment.id,
+        snapshot.carrier,
+        snapshot.trackingUrl,
+        snapshot.status,
+        snapshot.expectedDelivery,
+        snapshot.deliveredAt,
+      ]);
+      if (updatedShipment.rowCount === 0) return false;
+
+      await client.query(`
+        UPDATE orders
+        SET status = CASE WHEN status_rank($4) >= status_rank(status) THEN $4 ELSE status END,
+            updated_at = now()
+        WHERE workspace_id = $1 AND customer_id = $2 AND id = $3
+      `, [workspaceId, shipment.customerId, shipment.orderId, snapshot.status]);
+
+      const eventCopy = statusCopy(snapshot.status, snapshot.carrier);
+      await client.query(`
+        INSERT INTO order_events(
+          id, workspace_id, customer_id, order_id, status, label, detail, occurred_at, source_message_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (workspace_id, order_id, status, source_message_key) DO NOTHING
+      `, [
+        randomUUID(), workspaceId, shipment.customerId, shipment.orderId, snapshot.status,
+        eventCopy.label, eventCopy.detail, snapshot.deliveredAt ?? new Date(),
+        `carrier:${snapshot.carrier.toLowerCase()}:${snapshot.trackingNumber}:${snapshot.status}`,
+      ]);
+      return true;
+    });
   }
 
   async getOrCreatePortalToken(workspaceId: string, customerId: string, secretBox: SecretBox) {
@@ -1145,6 +1238,7 @@ export class Repository {
 
 function statusCopy(status: ParsedOrderStatus, carrier: string | null) {
   switch (status) {
+    case 'pending': return { label: 'Pending confirmation', detail: 'The retailer has not sent an explicit confirmation yet.' };
     case 'processing': return { label: 'Preparing shipment', detail: 'The order is being prepared.' };
     case 'shipped': return { label: 'Shipped', detail: carrier ? `Shipped via ${carrier}.` : 'The shipment is in transit.' };
     case 'delivered': return { label: 'Delivered', detail: 'The shipment was delivered.' };

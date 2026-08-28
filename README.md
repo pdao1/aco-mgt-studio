@@ -9,7 +9,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - Gmail app-password verification before a mailbox is saved.
 - AES-256-GCM encryption for app passwords at rest. The API never returns them and logs never include them.
 - Read-only Gmail IMAP polling of All Mail (with Inbox fallback), message de-duplication, and a bounded Gmail search for order-like mail.
-- Generic parsing for order number, merchant, total, confirmed/processing/shipped/delivered/cancelled status, UPS/USPS/FedEx/Amazon tracking, tracking URLs, and estimated delivery dates.
+- Generic parsing for order number, merchant, total, pending/confirmed/processing/shipped/delivered/cancelled status, UPS/USPS/FedEx/Amazon tracking, tracking URLs, and estimated delivery dates. Generic acknowledgements stay pending until a matching explicit confirmation email is seen.
 - PostgreSQL workspace isolation with forced row-level security on customer, mailbox, order, shipment, event, processed-message, sync-run, invoice, invoice-line, and Stripe-event tables.
 - An operator-password login backed by a signed, `HttpOnly`, `SameSite=Strict` session cookie.
 - A customer-facing portal at `/portal/:token`, reached through a persistent random link. The token is stored as a hash plus an encrypted recovery value and only returns that customer's normalized orders. Legacy seven-day signed links remain readable during transition.
@@ -23,6 +23,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - `/` is the public marketing site, `/app/dashboard` is the operator app, and `/app/admin/super` is reserved for the service owner.
 - Each workspace can set its customer-facing name, HTTPS logo, accent color, seller notification email, and Venmo payment URL. SMTP invoice notifications are optional and disabled until configured.
 - A versioned `orders.ingestion.v1` workflow seam separates extract, normalize, deterministic parse, optional AI item review, and load stages. With `OPENAI_KEY`, a bounded GPT-5 nano pass reviews only empty or suspicious item rows; without it, sync stays deterministic and network-free beyond Gmail.
+- Optional server-side USPS, UPS, and FedEx tracking polling updates shipment status and expected delivery without exposing carrier credentials to the browser. Each provider requires its own developer account/keys; the adapters do not call a carrier when credentials are absent.
 - A Docker/PostgreSQL runtime and a Render Blueprint.
 
 Raw email bodies, attachments, customer shipping addresses, and ordinary Gmail passwords are not persisted.
@@ -133,6 +134,7 @@ deployment path.
 3. Keep the generated `MAILBOX_ENCRYPTION_KEY`, `SESSION_SECRET`, and `PORTAL_SECRET` permanently. Losing or rotating the mailbox key without a migration makes existing mailbox secrets unreadable; rotating the portal key invalidates existing customer links.
 4. Deploy, check `/api/health`, activate the service with `SERVICE_SERIAL`, sign in, set each order's fee percentage in the inspector, and copy a static customer portal link.
 5. Optionally set `OPENAI_KEY` to enable the bounded item-row quality pass. The default `OPENAI_MODEL=gpt-5-nano` and `OPENAI_MAX_REVIEWS_PER_SYNC=25` keep it limited; leave the key blank for deterministic-only operation.
+6. Optionally configure carrier developer credentials (`USPS_CLIENT_ID`/`USPS_CLIENT_SECRET`, `UPS_CLIENT_ID`/`UPS_CLIENT_SECRET`, and `FEDEX_API_KEY`/`FEDEX_SECRET_KEY`). The server polls active shipments every `TRACKING_SYNC_INTERVAL_MINUTES` (default 30) and stops polling delivered/cancelled shipments. USPS, UPS, and FedEx each require a registered developer project even where the basic tracking tier is free.
 
 SMTP notifications use `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
 `SMTP_PASSWORD`, and `SMTP_FROM`. Set `NOTIFICATION_SELLER_EMAIL` as a fallback,
@@ -156,7 +158,7 @@ npm test
 npm run build
 ```
 
-Parser and encryption unit tests live in `tests/`. The design sources and native-size browser comparison captures live under `design/`.
+Parser, workflow, carrier-adapter, and encryption unit tests live in `tests/`. The design sources and native-size browser comparison captures live under `design/`.
 
 The implementation contract and future workflow/AI task boundaries are in
 [`docs/architecture.md`](docs/architecture.md).
@@ -165,7 +167,7 @@ The implementation contract and future workflow/AI task boundaries are in
 
 The parser is intentionally deterministic and provider-neutral. It covers common
 order and carrier formats, requires explicit evidence before accepting an item
-row, and rejects common recommendation/category/CSS fragments. When configured,
+row, and rejects common recommendation/category/CSS/link/UI fragments. When configured,
 the server can ask the low-cost GPT-5 nano reviewer to clean up only empty or
 suspicious item lists; the model cannot change order identity, status, totals,
 tracking, or billing. Set `OPENAI_KEY` and optionally `OPENAI_MODEL` and

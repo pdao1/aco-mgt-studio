@@ -161,6 +161,7 @@ export function OrderInspector({ order, customerName, onClose, onFeeSave, onOver
           <span>Status shown to customer</span>
           <select value={overrideStatus} onChange={(event) => setOverrideStatus(event.target.value as OrderStatus | '')} aria-label="Status shown to customer">
             <option value="">Use parsed status</option>
+            <option value="pending">Pending</option>
             <option value="confirmed">Confirmed</option>
             <option value="processing">Processing</option>
             <option value="shipped">Shipped</option>

@@ -54,7 +54,7 @@ function PortalView({
   selectedOrder: Order | null;
   onSelect: (orderId: string | null) => void;
 }) {
-  const [filter, setFilter] = useState<'all' | 'in-transit' | 'delivered' | 'processing' | 'cancelled'>('all');
+  const [filter, setFilter] = useState<'all' | 'in-transit' | 'delivered' | 'processing' | 'cancelled' | 'pending'>('all');
   const [search, setSearch] = useState('');
   const [retailer, setRetailer] = useState('');
   const retailers = useMemo(() => listRetailers(payload.orders), [payload.orders]);
@@ -114,6 +114,7 @@ function PortalView({
                   ['all', 'All'],
                   ['in-transit', 'In transit'],
                   ['delivered', 'Completed'],
+                  ['pending', 'Pending'],
                   ['processing', 'Stuck'],
                   ['cancelled', 'Cancelled'],
                 ] as const).map(([id, label]) => (
@@ -145,7 +146,7 @@ function PortalView({
                   {filteredOrders.map((order) => (
                     <tr key={order.id} className={selectedOrder?.id === order.id ? 'selected' : ''} onClick={() => onSelect(order.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect(order.id); }} tabIndex={0}>
                       <td><span className="portal-store-cell"><StoreMark store={order.store} /><span>{order.store}</span></span></td>
-                      <td className="portal-order-number">{order.orderNumber}</td>
+                      <td className="portal-order-number"><span>{order.orderNumber}</span>{order.trackingNumber && <small className="portal-order-tracking-inline">{order.carrier ?? 'Tracking'} · {maskTracking(order.trackingNumber)}</small>}</td>
                       <td>{formatDate(order.orderedAt)}</td>
                       <td>{formatMoney(order.totalCents, order.currency)}</td>
                       <td><span className="portal-fee-cell">{formatMoney(order.feeBasisCents, order.currency)} <small>{order.feeBasis === 'checkout_total' ? 'Checkout total' : 'Custom amount'}</small></span></td>
@@ -212,7 +213,7 @@ function PortalState({ title, detail, loading = false }: { title: string; detail
   return <main className="portal-state"><span className={loading ? 'portal-state-mark spinning' : 'portal-state-mark'}>{loading ? null : <ShieldCheck size={22} />}</span><h1>{title}</h1><p>{detail}</p></main>;
 }
 
-function countPortalOrders(orders: Order[], filter: 'all' | 'in-transit' | 'delivered' | 'processing' | 'cancelled') {
+function countPortalOrders(orders: Order[], filter: 'all' | 'in-transit' | 'delivered' | 'processing' | 'cancelled' | 'pending') {
   if (filter === 'all') return orders.length;
   if (filter === 'in-transit') return orders.filter((order) => order.status === 'shipped').length;
   return orders.filter((order) => order.status === filter).length;

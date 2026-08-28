@@ -24,6 +24,7 @@ interface OrdersTableProps {
 
 const filters: Array<{ id: OrderFilter; label: string }> = [
   { id: 'all', label: 'All' },
+  { id: 'pending', label: 'Pending' },
   { id: 'confirmed', label: 'Confirmed' },
   { id: 'processing', label: 'Processing' },
   { id: 'shipped', label: 'Shipped' },
@@ -137,7 +138,10 @@ export function OrdersTable({
                 <td>
                   <span className="store-cell"><StoreMark store={order.store} /><span>{order.store}</span></span>
                 </td>
-                <td className="order-number">{order.orderNumber}</td>
+                <td className="order-number">
+                  <span>{order.orderNumber}</span>
+                  {order.trackingNumber && <small className="order-tracking-inline">{order.carrier ?? 'Tracking'} · {maskTracking(order.trackingNumber)}</small>}
+                </td>
                 <td>{formatDate(order.orderedAt)}</td>
                 <td>{formatMoney(order.totalCents, order.currency)}</td>
                 <td><span className="fee-cell">{formatMoney(order.feeBasisCents, order.currency)} <small>{order.feeBasis === 'checkout_total' ? 'Checkout total' : 'Custom amount'}</small></span></td>

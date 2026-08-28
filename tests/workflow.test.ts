@@ -89,6 +89,57 @@ describe('order enrichment boundary', () => {
     });
   });
 
+  it('runs the nano item review when a retailer template includes link chrome', async () => {
+    const deterministic: ParsedOrderEmail = {
+      messageKey: 'message-link-noise',
+      merchant: 'Target',
+      orderNumber: '102003715051916',
+      status: 'confirmed',
+      totalCents: 4643,
+      currency: 'USD',
+      trackingNumber: null,
+      carrier: null,
+      trackingUrl: null,
+      expectedDelivery: null,
+      orderedAt: new Date('2026-08-20T12:00:00Z'),
+      itemCount: 1,
+      items: [{ name: 'Pokémon Trading Card Game', quantity: 1, unitPriceCents: null, totalCents: null }],
+    };
+    let reviewCalls = 0;
+    const repository = {
+      recordMessage: async () => true,
+    } as unknown as Repository;
+    const result = await runOrderIngestion('workspace', 'customer', {
+      messageId: 'message-link-noise',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Your order is confirmed',
+      text: 'Order number: 102003715051916\nhttps://click.oe.target.com/?qs=redacted\nPokémon Trading Card Game\nQty 1',
+      html: null,
+      receivedAt: deterministic.orderedAt,
+    }, {
+      messageKey: 'message-link-noise',
+      fromAddress: 'orders@target.com',
+      subject: 'Your order is confirmed',
+      receivedAt: deterministic.orderedAt,
+    }, {
+      repository,
+      parse: () => deterministic,
+      itemReviewBudget: { remaining: 1 },
+      enricher: {
+        name: 'test-reviewer',
+        enrich: async () => null,
+        reviewItems: async () => {
+          reviewCalls += 1;
+          return { items: [{ name: 'Pokémon Trading Card Game', quantity: 1, unitPriceCents: null, totalCents: null }] };
+        },
+      },
+    });
+
+    expect(result.source).toBe('ai');
+    expect(reviewCalls).toBe(1);
+  });
+
   it('sends a structured, redacted item-review request and reads Responses output', async () => {
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));

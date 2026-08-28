@@ -34,6 +34,21 @@ const schema = z.object({
   OPENAI_KEY: optionalSecret,
   OPENAI_MODEL: z.string().trim().min(1).max(120).default('gpt-5-nano'),
   OPENAI_MAX_REVIEWS_PER_SYNC: z.coerce.number().int().min(0).max(100).default(25),
+  // Optional carrier API credentials. Each carrier offers a no-cost developer
+  // tier, but all three require the operator to create an account and keys.
+  USPS_CLIENT_ID: optionalSecret,
+  USPS_CLIENT_SECRET: optionalSecret,
+  UPS_CLIENT_ID: optionalSecret,
+  UPS_CLIENT_SECRET: optionalSecret,
+  UPS_TRANSACTION_SRC: z.preprocess(
+    (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    z.string().trim().min(1).max(120),
+  ).default('aco-studio'),
+  FEDEX_API_KEY: optionalSecret,
+  FEDEX_SECRET_KEY: optionalSecret,
+  FEDEX_ACCOUNT_NUMBER: optionalSecret,
+  TRACKING_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
+  TRACKING_MAX_SHIPMENTS_PER_SYNC: z.coerce.number().int().min(1).max(1000).default(100),
   WORKSPACE_NAME: z.string().min(1).default('ACO Studio'),
   WORKSPACE_SLUG: z.string().regex(/^[a-z0-9-]+$/).default('default'),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -65,6 +80,16 @@ export type AppConfig = {
   openaiKey: string | null;
   openaiModel: string;
   openaiMaxReviewsPerSync: number;
+  uspsClientId: string | null;
+  uspsClientSecret: string | null;
+  upsClientId: string | null;
+  upsClientSecret: string | null;
+  upsTransactionSrc: string;
+  fedexApiKey: string | null;
+  fedexSecretKey: string | null;
+  fedexAccountNumber: string | null;
+  trackingSyncIntervalMinutes: number;
+  trackingMaxShipmentsPerSync: number;
   workspaceName: string;
   workspaceSlug: string;
   port: number;
@@ -106,6 +131,16 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     openaiKey: value.OPENAI_KEY ?? null,
     openaiModel: value.OPENAI_MODEL,
     openaiMaxReviewsPerSync: value.OPENAI_MAX_REVIEWS_PER_SYNC,
+    uspsClientId: value.USPS_CLIENT_ID ?? null,
+    uspsClientSecret: value.USPS_CLIENT_SECRET ?? null,
+    upsClientId: value.UPS_CLIENT_ID ?? null,
+    upsClientSecret: value.UPS_CLIENT_SECRET ?? null,
+    upsTransactionSrc: value.UPS_TRANSACTION_SRC,
+    fedexApiKey: value.FEDEX_API_KEY ?? null,
+    fedexSecretKey: value.FEDEX_SECRET_KEY ?? null,
+    fedexAccountNumber: value.FEDEX_ACCOUNT_NUMBER ?? null,
+    trackingSyncIntervalMinutes: value.TRACKING_SYNC_INTERVAL_MINUTES,
+    trackingMaxShipmentsPerSync: value.TRACKING_MAX_SHIPMENTS_PER_SYNC,
     workspaceName: value.WORKSPACE_NAME,
     workspaceSlug: value.WORKSPACE_SLUG,
     port: value.PORT,

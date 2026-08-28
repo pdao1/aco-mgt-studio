@@ -17,6 +17,8 @@ import { SecretBox } from './security/secret-box.js';
 import { verifyPortalToken } from './security/portal-token.js';
 import { issueServiceAccess, requireServiceAccess, serialMatches } from './security/access.js';
 import { SmtpNotifier } from './notifications/smtp.js';
+import { TrackingSyncCoordinator } from './tracking/coordinator.js';
+import { CompositeCarrierTrackingProvider, FedexTrackingProvider, UpsTrackingProvider, UspsTrackingProvider } from './tracking/providers.js';
 import {
   clearSession,
   enforceOrigin,
@@ -52,6 +54,18 @@ const syncCoordinator = new MailboxSyncCoordinator(
   config.openaiMaxReviewsPerSync,
 );
 syncCoordinator.startPolling(config.syncIntervalMinutes);
+const carrierTrackingProvider = new CompositeCarrierTrackingProvider([
+  new UspsTrackingProvider(config.uspsClientId, config.uspsClientSecret),
+  new UpsTrackingProvider(config.upsClientId, config.upsClientSecret, config.upsTransactionSrc),
+  new FedexTrackingProvider(config.fedexApiKey, config.fedexSecretKey, config.fedexAccountNumber),
+]);
+const trackingCoordinator = new TrackingSyncCoordinator(
+  repository,
+  workspaceId,
+  carrierTrackingProvider,
+  config.trackingMaxShipmentsPerSync,
+);
+trackingCoordinator.startPolling(config.trackingSyncIntervalMinutes);
 const stripeGateway = new StripeBillingGateway(config.stripeSecretKey);
 const smtpNotifier = new SmtpNotifier({
   host: config.smtpHost,
@@ -439,7 +453,7 @@ app.patch('/api/orders/:orderId/fee', async (request, response, next) => {
 });
 
 const orderOverrideSchema = z.object({
-  status: z.enum(['confirmed', 'processing', 'shipped', 'delivered', 'cancelled']).nullable(),
+  status: z.enum(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']).nullable(),
   note: z.string().trim().max(240).optional().nullable(),
 }).strict();
 
@@ -495,6 +509,7 @@ const server = app.listen(config.port, '0.0.0.0', () => {
 
 const shutdown = async () => {
   syncCoordinator.stopPolling();
+  trackingCoordinator.stopPolling();
   server.close();
   await repository.close();
   process.exit(0);

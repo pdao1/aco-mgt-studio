@@ -43,7 +43,7 @@ export async function runOrderIngestion(
     let itemReviewAccepted = false;
     const budget = dependencies.itemReviewBudget;
     if (enricher?.reviewItems
-      && shouldReviewItems(deterministic)
+      && shouldReviewItems(deterministic, `${email.text}\n${email.html ?? ''}`)
       && deterministic.status !== 'cancelled'
       && (!budget || budget.remaining > 0)) {
       if (budget) budget.remaining -= 1;
@@ -95,7 +95,12 @@ export async function runOrderIngestion(
   return { matched, source: enricher.name === 'none' ? 'none' : 'ai', validation: matched ? 'accepted' : 'skipped' };
 }
 
-function shouldReviewItems(order: ParsedOrderEmail): boolean {
+function shouldReviewItems(order: ParsedOrderEmail, sourceText: string): boolean {
+  // Navigation/analytics rows are filtered deterministically, but their
+  // presence is still a useful signal that the retailer's template needs a
+  // cheap second pass. The nano reviewer sees a redacted excerpt and can
+  // return only the actual purchasable rows.
+  if (/https?:\/\/|click\.oe\.target\.com|\bview\s+order\s+details\b|\bcancel(?:led|ed)\s+item\b/i.test(sourceText)) return true;
   if (order.items.length === 0) {
     // Confirmation/processing mail is where item rows normally live. Avoid
     // paying for a review on shipment/delivery notices that carry only a

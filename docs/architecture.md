@@ -14,7 +14,7 @@ Stripe/Venmo payment links when configured.
 | Goal | Turn each connected Gmail inbox into scoped, normalized order facts, then let an operator review, override, invoice, and collect payment. |
 | Source of truth | PostgreSQL rows scoped by `workspace_id`; browser filters are presentation only. |
 | Mailbox boundary | Gmail IMAP is read-only. App passwords are encrypted with `SecretBox`; raw bodies and attachments are not persisted. |
-| Order facts | Parser-owned status and purchase totals remain separate from `status_override`, `override_note`, fee basis type, custom basis amount, and fee basis points. |
+| Order facts | Parser-owned status and purchase totals remain separate from `status_override`, `override_note`, fee basis type, custom basis amount, and fee basis points. A generic acknowledgement is `pending`; only explicit confirmation or a later fulfillment signal promotes it. |
 | Billing | An invoice snapshots selected ACO service fees. Purchase totals and fee bases remain informational references; drafts can be recalculated and issued invoices lock order fees. |
 | Payment | Stripe Invoicing creates a hosted payment page. An optional workspace Venmo URL is shown as an external manual-payment option. Stripe webhook event IDs are stored before applying a state transition. |
 | Access | A server-side `SERVICE_SERIAL` unlocks a signed, HttpOnly access cookie. Operator sessions remain separate and are still required. |
@@ -22,6 +22,7 @@ Stripe/Venmo payment links when configured.
 | Order detail | Parsed line items are stored as bounded JSON on the customer-scoped order and rendered in both the operator inspector and customer portal detail view. |
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
 | Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
+| Carrier tracking | `TrackingSyncCoordinator` polls active shipment rows on a bounded interval. USPS, UPS, and FedEx adapters use server-side OAuth credentials, cache tokens, map carrier vocabulary to the canonical order status, and fail soft per shipment. Delivered/cancelled shipments are not polled again. |
 | AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
 
@@ -86,10 +87,19 @@ The current IMAP consumer calls these stages through
 - Transient IMAP failures are retried by the next scheduled run. Duplicate
   messages are skipped by the processed-message unique key. Ambiguous AI
   results are rejected and remain unbilled until an operator reviews them.
+- Carrier polling is optional and requires provider credentials. Basic tracking
+  access is free to license/use where offered, but the carrier accounts and
+  OAuth keys still have to be created by the operator. API failures never block
+  Gmail ingestion or change an order to a less advanced status.
 
 Terminal states are `completed`, `failed`, or `cancelled` for a run;
 `synced`, `warning`, or `error` for a customer; and `draft`, `open`, `paid`,
 `void`, or `uncollectible` for an invoice.
+
+Order status is monotonic: `pending` → `confirmed` → `processing` → `shipped`
+→ `delivered`, with `cancelled` as a terminal cancellation signal. An explicit
+confirmation email with a known order number therefore repairs a pending row;
+carrier polling cannot regress a later state.
 
 ### Backfill and reconciliation
 
@@ -150,9 +160,10 @@ scheduling until those adapters exist.
 
 The deterministic parser is the acceptance baseline. It now requires explicit
 product-label or quantity evidence for unlabelled rows and rejects common
-recommendation/category/CSS fragments; this prevents a retailer's email chrome
-from becoming purchased items. If an order has no clean item rows (or a
-suspicious name) and `OPENAI_KEY` is present, the server sends a redacted,
+recommendation/category/CSS/link/UI fragments; this prevents a retailer's email
+chrome from becoming purchased items. If an order has no clean item rows, a
+suspicious name, or link/UI chrome in the source and `OPENAI_KEY` is present,
+the server sends a redacted,
 line-preserving excerpt to the GPT-5 nano Responses API with Structured Outputs
 (`order-items.v1`). The prompt requires purchasable rows only and permits an
 empty result when uncertain. `store:false`, a 10-second timeout, and a default
@@ -167,6 +178,25 @@ The default model is configurable with `OPENAI_MODEL` and is set to
 `gpt-5-nano`; the key and model are server-side environment variables only.
 Before changing the prompt or model, add sanitized retailer fixtures and compare
 false-item rate against the deterministic baseline.
+
+### Carrier access notes
+
+The adapters use the carriers' official developer APIs rather than scraping
+tracking pages. The basic access options are:
+
+- [USPS Developer Portal](https://devs.usps.com/getting-started) — create a
+  developer account and OAuth application; the default product quota is
+  limited, so the polling interval and per-sync cap are intentionally bounded.
+- [UPS Developer Portal](https://developer.ups.com/get-started?loc=en_EN) — the
+  Track API uses OAuth 2.0 client credentials and a bearer token.
+- [FedEx Basic Integrated Visibility](https://developer.fedex.com/api/en-us/catalog/track/v1/docs.html)
+  — the basic Track API supports tracking numbers and estimated delivery data;
+  advanced webhook/subscription features are separate.
+
+“Free” here means the basic developer/API tier does not add a per-request
+service fee where the carrier offers it; it does not mean anonymous access.
+Each carrier still requires the ACO operator to register an account and keep
+its credentials in server-only environment variables.
 
 ## Security and rollback
 

@@ -79,4 +79,11 @@ describe('PostgreSQL tenant and privacy schema', () => {
     expect(sql).toContain("items jsonb NOT NULL DEFAULT '[]'::jsonb");
     expect(sql).toContain("jsonb_typeof(items) = 'array'");
   });
+
+  it('allows pending acknowledgements and ranks explicit confirmation above them', async () => {
+    const sql = await readFile(new URL('../server/database/migrations/008_pending_order_status.sql', import.meta.url), 'utf8');
+    expect(sql).toContain("WHEN 'pending' THEN 1");
+    expect(sql).toContain("WHEN 'confirmed' THEN 2");
+    expect(sql).toContain("status IN ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled')");
+  });
 });
