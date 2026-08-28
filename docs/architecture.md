@@ -22,7 +22,7 @@ Stripe/Venmo payment links when configured.
 | Order detail | Parsed line items are stored as bounded JSON on the customer-scoped order and rendered in both the operator inspector and customer portal detail view. |
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
 | Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
-| AI | Deterministic parsing runs first. The optional enrichment provider receives only a redacted, bounded excerpt and must return data that the workflow validates before loading. No model is enabled by default. |
+| AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
 
 ## Product surfaces
@@ -71,7 +71,7 @@ The current IMAP consumer calls these stages through
 | Extract | workspace, customer, sync run, bounded Gmail search window | message source held in memory; scanned count | read-only IMAP fetch | reconnect with bounded timeout; message key is provider Message-ID or content hash |
 | Normalize | one fetched source | bounded `EmailInput` with subject/from/date/text/html | none | deterministic per message key; source is never logged or stored |
 | Deterministic parse | normalized email | `ParsedOrderEmail` or no match | none | pure function; reruns produce the same normalized values |
-| Optional AI enrich | redacted domain, subject, 6,000-character excerpt, message key | unknown provider output validated into `ParsedOrderEmail` or rejected | model usage accounting belongs to provider | provider call is bounded; no blind retry of validation failures |
+| Optional AI item review | redacted retailer domain, subject, known order number, and 6,000-character line-preserving excerpt | item-only structured output validated into bounded `ParsedOrderItem[]` or ignored | provider call is bounded to `OPENAI_MAX_REVIEWS_PER_SYNC` (default 25) | timeout/provider/schema failure keeps the deterministic order; no blind retry |
 | Load | workspace, customer, message metadata, validated order | processed-message result and normalized order/event/shipment rows | PostgreSQL transaction/upserts | unique `(workspace, customer, message_key)` and order keys prevent duplicates |
 | Reconcile | sync run and database counts | completed/failed run and repair candidates | customer sync state update | repeatable query; failed records remain visible for operator repair |
 
@@ -148,13 +148,25 @@ scheduling until those adapters exist.
 
 ## OpenAI/AI decision record
 
-The deterministic parser already handles known retailer and carrier templates,
-so it remains the acceptance baseline. The repository currently ships only the
-provider interface and redaction/validation boundary. A future provider must
-document its verified model/capabilities, structured-output schema, prompt
-version, confidence threshold, escalation reason, usage budget, retention
-behavior, and evaluation set before being enabled. Low-confidence or malformed
-results go to the operator queue rather than changing an order silently.
+The deterministic parser is the acceptance baseline. It now requires explicit
+product-label or quantity evidence for unlabelled rows and rejects common
+recommendation/category/CSS fragments; this prevents a retailer's email chrome
+from becoming purchased items. If an order has no clean item rows (or a
+suspicious name) and `OPENAI_KEY` is present, the server sends a redacted,
+line-preserving excerpt to the GPT-5 nano Responses API with Structured Outputs
+(`order-items.v1`). The prompt requires purchasable rows only and permits an
+empty result when uncertain. `store:false`, a 10-second timeout, and a default
+25-review-per-sync budget keep the quality pass bounded. The result can update
+only `items`/`itemCount`; order identity, status, totals, tracking, and billing
+remain deterministic. Provider errors and malformed output are logged as a
+safe reason and leave the deterministic record intact. No model call is made
+when the key is absent, for cancellation notices, or after the per-sync budget
+is exhausted. Raw mailbox credentials, headers, and HTML are never sent.
+
+The default model is configurable with `OPENAI_MODEL` and is set to
+`gpt-5-nano`; the key and model are server-side environment variables only.
+Before changing the prompt or model, add sanitized retailer fixtures and compare
+false-item rate against the deterministic baseline.
 
 ## Security and rollback
 

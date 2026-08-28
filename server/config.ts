@@ -29,6 +29,11 @@ const schema = z.object({
   SMTP_FROM: optionalSecret,
   NOTIFICATION_SELLER_EMAIL: optionalSecret,
   VENMO_PAYMENT_URL: optionalSecret,
+  // Optional low-cost item-row review. Order identity/status stay deterministic
+  // even when this provider is disabled or unavailable.
+  OPENAI_KEY: optionalSecret,
+  OPENAI_MODEL: z.string().trim().min(1).max(120).default('gpt-5-nano'),
+  OPENAI_MAX_REVIEWS_PER_SYNC: z.coerce.number().int().min(0).max(100).default(25),
   WORKSPACE_NAME: z.string().min(1).default('ACO Studio'),
   WORKSPACE_SLUG: z.string().regex(/^[a-z0-9-]+$/).default('default'),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -57,6 +62,9 @@ export type AppConfig = {
   smtpFrom: string | null;
   notificationSellerEmail: string | null;
   venmoPaymentUrl: string | null;
+  openaiKey: string | null;
+  openaiModel: string;
+  openaiMaxReviewsPerSync: number;
   workspaceName: string;
   workspaceSlug: string;
   port: number;
@@ -95,6 +103,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     smtpFrom: value.SMTP_FROM ?? null,
     notificationSellerEmail: value.NOTIFICATION_SELLER_EMAIL ?? null,
     venmoPaymentUrl: value.VENMO_PAYMENT_URL ?? null,
+    openaiKey: value.OPENAI_KEY ?? null,
+    openaiModel: value.OPENAI_MODEL,
+    openaiMaxReviewsPerSync: value.OPENAI_MAX_REVIEWS_PER_SYNC,
     workspaceName: value.WORKSPACE_NAME,
     workspaceSlug: value.WORKSPACE_SLUG,
     port: value.PORT,

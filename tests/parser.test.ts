@@ -190,6 +190,78 @@ describe('parseOrderEmail', () => {
     ]);
   });
 
+  it('does not promote recommendation headings or CSS fragments to purchased items', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<noisy-items@example>',
+      fromAddress: 'orders@walmart.com',
+      fromName: 'Walmart',
+      subject: 'Your order is confirmed',
+      text: [
+        'Order number: 200001234567890',
+        'border Apple AirPods 4 with Active Noise Cancellation ( $179.00',
+        ') Item border Item border',
+        'More items to explore $35.00',
+        '(2 pack) Apple 30W USB-C Power Adapter ( $35.00',
+        'Apple 20W USB-C Power Adapter - iPhone Charger ( $19.00',
+        'Video games',
+        'Toys & games',
+        'Order total: $233.00',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([]);
+    expect(parsed?.itemCount).toBeNull();
+  });
+
+  it('does not mark an order cancelled because a product name contains cancellation', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<noise-cancellation-product@example>',
+      fromAddress: 'orders@walmart.com',
+      fromName: 'Walmart',
+      subject: 'Your order is confirmed',
+      text: 'Order number: 200001234567890\nApple AirPods with Active Noise Cancellation\nQty: 1\nOrder total: $179.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.status).toBe('confirmed');
+  });
+
+  it('keeps each split-row price attached to its own product', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<split-noisy-items@example>',
+      fromAddress: 'orders@walmart.com',
+      fromName: 'Walmart',
+      subject: 'Your order is confirmed',
+      text: [
+        'Order number: 200001234567890',
+        'border Apple AirPods 4 with Active Noise Cancellation (',
+        'Qty 1 · $179.00 each',
+        'More items to explore',
+        'Qty 1 · $35.00 each',
+        '(2 pack) Apple 30W USB-C Power Adapter (',
+        'Qty 1 · $35.00 each',
+        'Apple 20W USB-C Power Adapter - iPhone Charger (',
+        'Qty 1 · $19.00 each',
+        'Video games',
+        'Qty 1',
+        'Toys & games',
+        'Qty 1',
+        'Order total: $233.00',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([
+      { name: 'Apple AirPods 4 with Active Noise Cancellation', quantity: 1, unitPriceCents: 17900, totalCents: null },
+      { name: '(2 pack) Apple 30W USB-C Power Adapter', quantity: 1, unitPriceCents: 3500, totalCents: null },
+      { name: 'Apple 20W USB-C Power Adapter - iPhone Charger', quantity: 1, unitPriceCents: 1900, totalCents: null },
+    ]);
+  });
+
   it('only treats long numeric values as FedEx tracking when tracking context is present', () => {
     const parsed = parseOrderEmail({
       messageId: '<fedex@example>',

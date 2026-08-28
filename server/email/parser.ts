@@ -124,8 +124,12 @@ function looksOrderRelated(text: string): boolean {
 function parseStatus(subject: string, text: string): ParsedOrderStatus {
   const normalizedSubject = subject.toLowerCase();
   if (/cancelled|canceled|cancellation|refund(?:ed)?/.test(normalizedSubject)
-    || /\b(?:order|purchase|shipment|item)\b[\s\S]{0,100}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(text)
-    || /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[\s\S]{0,100}\b(?:order|purchase|shipment|item)\b/i.test(text)) return 'cancelled';
+    // Keep cancellation matching on one rendered line. Looking across
+    // arbitrary newlines turns a product name such as "Noise Cancellation"
+    // into a cancelled order simply because an order number appeared earlier
+    // in the email.
+    || /\b(?:order|purchase|shipment)\b[^\r\n]{0,120}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(text)
+    || /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[^\r\n]{0,120}\b(?:order|purchase|shipment)\b/i.test(text)) return 'cancelled';
   if (/delivered/.test(normalizedSubject) || /\b(?:package|order|shipment) (?:was |has been )?delivered\b/i.test(text)) return 'delivered';
   if (/shipped|on the way|in transit|out for delivery/.test(normalizedSubject) || /\b(?:has shipped|shipped via|tracking number)\b/i.test(text)) return 'shipped';
   if (/processing|preparing|getting your order ready/.test(normalizedSubject) || /\bpreparing (?:your )?(?:order|shipment)\b/i.test(text)) return 'processing';
@@ -191,6 +195,12 @@ function parseItems(text: string): ParsedOrderItem[] {
     const nextLines: string[] = [];
     for (const candidate of lines.slice(index + 1, index + 4)) {
       if (/^(?:item|product|description|title)(?:\s+\d+)?\s*[:#-]/i.test(candidate)) break;
+      // Once quantity/price evidence has appeared, the next descriptive line
+      // is a new product row. Without this boundary, the last price in the
+      // look-ahead window can be borrowed from the following item.
+      if (nextLines.length > 0
+        && hasItemEvidence(nextLines.join(' | '))
+        && (isMetadataLine(candidate) || looksLikeItemStart(candidate))) break;
       nextLines.push(candidate);
     }
     const adjacentDetails = nextLines.join(' | ');
@@ -202,8 +212,10 @@ function parseItems(text: string): ParsedOrderItem[] {
     if (labelled || isMetadataLine(line) || isNarrativeLine(line) || isValueOnlyLine(line)) continue;
 
     // Common retailer layout: product name on one line, followed by Qty and
-    // price on the next one or two lines.
-    if (adjacentDetails && /(?:qty|quantity|\$)/i.test(adjacentDetails)) {
+    // price on the next one or two lines. Quantity is required for an
+    // unlabelled row; a lone dollar amount is often recommendation/upsell
+    // content rather than an item in the order.
+    if (adjacentDetails && /(?:qty|quantity)\b/i.test(adjacentDetails)) {
       const following = parseItemLine(`${line} | ${adjacentDetails}`, false, '');
       if (following) items.push(following);
     }
@@ -222,14 +234,16 @@ function parseItemLine(value: string, labelled: boolean, adjacentDetails: string
   if (!line || (!labelled && (isMetadataLine(line) || isNarrativeLine(line)))) return null;
 
   const detailText = `${line}${adjacentDetails ? ` | ${adjacentDetails}` : ''}`;
-  const quantityMatch = detailText.match(/(?:^|[|\s])(?:qty|quantity)\s*(?::|#|=|-|\|)?\s*(\d{1,3})\b/i)
+  const quantityMatch = detailText.match(/(?:^|[|\s])(?:qty|quantity)\b[^\d]{0,20}(\d{1,3})\b/i)
     ?? detailText.match(/^(\d{1,3})\s*[x×]\s+/i);
   const quantity = quantityMatch ? Math.max(1, Number.parseInt(quantityMatch[1], 10)) : 1;
   const lineMoneyMatches = [...line.matchAll(/\$\s*([\d,]+\.\d{2})/g)];
   const moneyMatches = lineMoneyMatches.length > 0
     ? lineMoneyMatches
     : [...detailText.matchAll(/\$\s*([\d,]+\.\d{2})/g)];
-  if (!labelled && !quantityMatch && moneyMatches.length === 0 && !line.includes('|')) return null;
+  // Do not guess that arbitrary prose containing a price is an item. A row
+  // must carry an explicit product label or quantity evidence.
+  if (!labelled && !quantityMatch) return null;
 
   const parts = line.split('|').map((part) => part.trim()).filter(Boolean);
   let name = parts.find((part) => !/(?:qty|quantity|sku|price|total)\s*[:#=-]?/i.test(part) && !/^\$?[\d,]+(?:\.\d{2})?$/.test(part)) ?? line;
@@ -237,10 +251,17 @@ function parseItemLine(value: string, labelled: boolean, adjacentDetails: string
     .replace(/^(?:\d{1,3})\s*[x×]\s*/i, '')
     .replace(/(?:qty|quantity)\s*[:#=-]?\s*\d{1,3}\b/gi, '')
     .replace(/\$\s*[\d,]+\.\d{2}/g, '')
+    .replace(/^\s*[)\]}]+\s*/, '')
+    // Inline styles can leak into a text-only MIME part. Remove only obvious
+    // CSS property tokens at the beginning, never arbitrary words in a name.
+    .replace(/^(?:border(?:-[a-z]+)?|background(?:-[a-z]+)?|padding|margin|font(?:-[a-z]+)?|color|display|width|height)\s*[:=-]?\s+/i, '')
     .replace(/\s*[-—–:]\s*$/, '')
+    .replace(/[({\[]+\s*$/, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (name.length < 2 || name.length > 240 || isMetadataLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)) return null;
+  if (name.length < 2 || name.length > 240 || !/[A-Za-z]/.test(name)
+    || isMetadataLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)
+    || isNonProductLine(name)) return null;
 
   const price = moneyMatches.at(-1)?.[1];
   const priceCents = price ? parseMoneyCents(price) : null;
@@ -276,6 +297,25 @@ function isValueOnlyLine(value: string): boolean {
 
 function isNarrativeLine(value: string): boolean {
   return /^(?:your|we|thanks?|thank\s+you|hi|hello)\b[\s\S]*\b(?:order|purchase|shipment|delivery)\b[\s\S]*\b(?:confirmed|received|placed|ready|shipped|delivered|cancelled|canceled)\b/i.test(value.trim());
+}
+
+function isNonProductLine(value: string): boolean {
+  return /^(?:more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?|(?:video\s+)?games?|toys?(?:\s*&\s*games)?|shop\s+now|view\s+(?:order|cart)|order\s+summary)$/i.test(value.trim())
+    || /(?:item\s+border|border\s+item|background-color|font-size|padding-top)/i.test(value)
+    || /^(?:border|background|padding|margin|font|color|display|width|height)\b/i.test(value.trim());
+}
+
+function hasItemEvidence(value: string): boolean {
+  return /(?:qty|quantity)\b[^\d]{0,20}\d{1,3}\b/i.test(value)
+    || /\$\s*[\d,]+\.\d{2}/.test(value);
+}
+
+function looksLikeItemStart(value: string): boolean {
+  return !isMetadataLine(value)
+    && !isNarrativeLine(value)
+    && !isValueOnlyLine(value)
+    && !/^(?:color|colour|size|variant|style|sku|model|condition|each)\b/i.test(value)
+    && /[A-Za-z]/.test(value);
 }
 
 function findTrackingUrl(value: string): string | null {

@@ -44,6 +44,12 @@ services:
         sync: false
       - key: VENMO_PAYMENT_URL
         sync: false
+      - key: OPENAI_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5-nano
+      - key: OPENAI_MAX_REVIEWS_PER_SYNC
+        value: "25"
       - key: OPERATOR_PASSWORD
         sync: false
       - key: APP_ORIGIN

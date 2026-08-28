@@ -8,9 +8,25 @@ export interface OrderEnrichmentInput {
   bodyExcerpt: string;
 }
 
+/**
+ * A deliberately narrower input used when the deterministic parser already
+ * established the order identity/status and only the item rows are unclear.
+ * The model never receives the mailbox credential, full headers, or raw HTML.
+ */
+export interface OrderItemReviewInput {
+  messageKey: string;
+  fromDomain: string | null;
+  subject: string;
+  merchant: string;
+  orderNumber: string | null;
+  receivedAt: Date;
+  bodyExcerpt: string;
+}
+
 export interface OrderEnrichmentProvider {
   readonly name: string;
   enrich(input: OrderEnrichmentInput): Promise<unknown>;
+  reviewItems?(input: OrderItemReviewInput): Promise<unknown>;
 }
 
 /** The safe default keeps every mailbox sync deterministic and network-free. */
@@ -61,6 +77,12 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
   };
 }
 
+/** Validate a model response without allowing it to alter order identity. */
+export function validateEnrichedItems(value: unknown): ParsedOrderItem[] | null {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { items?: unknown }).items)) return null;
+  return normalizeEnrichedItems((value as { items: unknown[] }).items);
+}
+
 function normalizeEnrichedItems(value: unknown): ParsedOrderItem[] {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 50).flatMap((entry) => {
@@ -92,11 +114,7 @@ export function buildRedactedEnrichmentInput(input: {
   const fromDomain = input.fromAddress.split('@')[1]?.toLowerCase() ?? null;
   const redactEmails = (value: string) => value.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi, '[redacted-email]');
   const subject = redactEmails(input.subject).slice(0, 500);
-  const bodyExcerpt = `${subject}\n${input.text}`
-    .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi, '[redacted-email]')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 6_000);
+  const bodyExcerpt = redactMailboxText(`${subject}\n${input.text}`).slice(0, 6_000);
   return {
     messageKey: input.messageKey,
     fromDomain,
@@ -104,4 +122,40 @@ export function buildRedactedEnrichmentInput(input: {
     receivedAt: input.receivedAt,
     bodyExcerpt,
   };
+}
+
+export function buildRedactedItemReviewInput(input: {
+  messageKey: string;
+  fromAddress: string;
+  subject: string;
+  text: string;
+  receivedAt: Date;
+  merchant: string;
+  orderNumber: string | null;
+}): OrderItemReviewInput {
+  const fromDomain = input.fromAddress.split('@')[1]?.toLowerCase() ?? null;
+  return {
+    messageKey: input.messageKey,
+    fromDomain,
+    subject: redactMailboxText(input.subject).slice(0, 500),
+    merchant: input.merchant.slice(0, 120),
+    orderNumber: input.orderNumber,
+    receivedAt: input.receivedAt,
+    // Keep line breaks: they are often the only signal separating a product
+    // row from a retailer's navigation/recommendation copy.
+    bodyExcerpt: redactMailboxText(input.text).slice(0, 6_000),
+  };
+}
+
+function redactMailboxText(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => !/(?:app\s+password|password|passcode|credit\s+card|card\s+(?:ending|number)|cvv|security\s+code|billing\s+address|shipping\s+address)/i.test(line))
+    .join('\n')
+    .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi, '[redacted-email]')
+    .replace(/(?:\+?\d[\d\s().-]{8,}\d)/g, '[redacted-phone]')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }

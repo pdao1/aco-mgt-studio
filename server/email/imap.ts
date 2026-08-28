@@ -5,6 +5,7 @@ import type { Repository } from '../database/repository.js';
 import { SecretBox } from '../security/secret-box.js';
 import { parseOrderEmail } from './parser.js';
 import { runOrderIngestion } from '../workflows/order-ingestion.js';
+import type { OrderEnrichmentProvider } from '../workflows/order-enrichment.js';
 
 const GMAIL_HOST = 'imap.gmail.com';
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
@@ -44,6 +45,8 @@ export class MailboxSyncCoordinator {
     private readonly secretBox: SecretBox,
     private readonly workspaceId: string,
     private readonly maxMessages: number,
+    private readonly enricher?: OrderEnrichmentProvider,
+    private readonly maxAiReviewsPerSync = 25,
   ) {}
 
   startPolling(intervalMinutes: number) {
@@ -80,6 +83,7 @@ export class MailboxSyncCoordinator {
     const runId = await this.repository.beginSync(this.workspaceId, customerId);
     let scanned = 0;
     let matched = 0;
+    const itemReviewBudget = { remaining: this.maxAiReviewsPerSync };
     const knownOrderNumbers = new Set(await this.repository.listOrderNumbers(this.workspaceId, customerId));
     const client = createClient(mailbox.gmailAddress, this.secretBox.decrypt(mailbox.secretCiphertext));
 
@@ -158,6 +162,8 @@ export class MailboxSyncCoordinator {
             }, {
               repository: this.repository,
               parse: () => parsedOrder,
+              enricher: this.enricher,
+              itemReviewBudget,
             });
             if (parsedOrder?.orderNumber) knownOrderNumbers.add(parsedOrder.orderNumber);
             if (result.matched) matched += 1;

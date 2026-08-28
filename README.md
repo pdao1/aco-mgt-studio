@@ -22,7 +22,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - A beta serial gate protects the operator surface. The serial is server-side (`SERVICE_SERIAL`) and unlocks a signed, HttpOnly access cookie; it is never shipped to the browser.
 - `/` is the public marketing site, `/app/dashboard` is the operator app, and `/app/admin/super` is reserved for the service owner.
 - Each workspace can set its customer-facing name, HTTPS logo, accent color, seller notification email, and Venmo payment URL. SMTP invoice notifications are optional and disabled until configured.
-- A versioned `orders.ingestion.v1` workflow seam separates extract, normalize, deterministic parse, optional AI enrichment, and load stages. The current safe default uses no external model until an approved provider is configured.
+- A versioned `orders.ingestion.v1` workflow seam separates extract, normalize, deterministic parse, optional AI item review, and load stages. With `OPENAI_KEY`, a bounded GPT-5 nano pass reviews only empty or suspicious item rows; without it, sync stays deterministic and network-free beyond Gmail.
 - A Docker/PostgreSQL runtime and a Render Blueprint.
 
 Raw email bodies, attachments, customer shipping addresses, and ordinary Gmail passwords are not persisted.
@@ -132,6 +132,7 @@ deployment path.
 2. Set `APP_ORIGIN` to the final HTTPS origin, for example `https://aco-studio.onrender.com`.
 3. Keep the generated `MAILBOX_ENCRYPTION_KEY`, `SESSION_SECRET`, and `PORTAL_SECRET` permanently. Losing or rotating the mailbox key without a migration makes existing mailbox secrets unreadable; rotating the portal key invalidates existing customer links.
 4. Deploy, check `/api/health`, activate the service with `SERVICE_SERIAL`, sign in, set each order's fee percentage in the inspector, and copy a static customer portal link.
+5. Optionally set `OPENAI_KEY` to enable the bounded item-row quality pass. The default `OPENAI_MODEL=gpt-5-nano` and `OPENAI_MAX_REVIEWS_PER_SYNC=25` keep it limited; leave the key blank for deterministic-only operation.
 
 SMTP notifications use `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
 `SMTP_PASSWORD`, and `SMTP_FROM`. Set `NOTIFICATION_SELLER_EMAIL` as a fallback,
@@ -162,4 +163,13 @@ The implementation contract and future workflow/AI task boundaries are in
 
 ## Current parser boundary
 
-The parser is intentionally deterministic and provider-neutral. It covers common order and carrier formats, but retailer templates change. Add sanitized `.eml` fixtures and parser rules as new formats are encountered. The service stores only normalized facts and limited message metadata, so adding a new rule does not require retaining historical email bodies.
+The parser is intentionally deterministic and provider-neutral. It covers common
+order and carrier formats, requires explicit evidence before accepting an item
+row, and rejects common recommendation/category/CSS fragments. When configured,
+the server can ask the low-cost GPT-5 nano reviewer to clean up only empty or
+suspicious item lists; the model cannot change order identity, status, totals,
+tracking, or billing. Set `OPENAI_KEY` and optionally `OPENAI_MODEL` and
+`OPENAI_MAX_REVIEWS_PER_SYNC` in the server environment. Add sanitized `.eml`
+fixtures and parser rules as new retailer formats are encountered. The service
+stores only normalized facts and limited message metadata, so adding a new rule
+does not require retaining historical email bodies.

@@ -11,6 +11,7 @@ import { runMigrations } from './database/migrate.js';
 import { Repository } from './database/repository.js';
 import { BillingValidationError, OrderBillingLockedError } from './database/repository.js';
 import { MailboxSyncCoordinator, verifyGmailConnection } from './email/imap.js';
+import { OpenAIOrderEnrichmentProvider } from './workflows/openai-order-review.js';
 import { StripeBillingError, StripeBillingGateway, StripeNotConfiguredError } from './billing/stripe.js';
 import { SecretBox } from './security/secret-box.js';
 import { verifyPortalToken } from './security/portal-token.js';
@@ -39,7 +40,17 @@ if ((config.venmoPaymentUrl && !existingSettings.venmoPaymentUrl) || (config.not
   });
 }
 const secretBox = new SecretBox(config.mailboxEncryptionKey);
-const syncCoordinator = new MailboxSyncCoordinator(repository, secretBox, workspaceId, config.syncMaxMessages);
+const orderEnricher = config.openaiKey
+  ? new OpenAIOrderEnrichmentProvider(config.openaiKey, config.openaiModel)
+  : undefined;
+const syncCoordinator = new MailboxSyncCoordinator(
+  repository,
+  secretBox,
+  workspaceId,
+  config.syncMaxMessages,
+  orderEnricher,
+  config.openaiMaxReviewsPerSync,
+);
 syncCoordinator.startPolling(config.syncIntervalMinutes);
 const stripeGateway = new StripeBillingGateway(config.stripeSecretKey);
 const smtpNotifier = new SmtpNotifier({

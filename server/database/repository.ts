@@ -952,6 +952,7 @@ export class Repository {
             items = CASE
               WHEN jsonb_array_length(EXCLUDED.items) > 0
                 AND (jsonb_array_length(orders.items) = 0
+                  OR orders.items::text ~* '(item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
                   OR COALESCE(EXCLUDED.item_count, 0) >= COALESCE(orders.item_count, 0))
                 THEN EXCLUDED.items
               ELSE orders.items
@@ -976,7 +977,9 @@ export class Repository {
             item_count = COALESCE($6, item_count),
             items = CASE
               WHEN jsonb_array_length($7::jsonb) > 0
-                AND (jsonb_array_length(items) = 0 OR COALESCE($6, 0) >= COALESCE(item_count, 0))
+                AND (jsonb_array_length(items) = 0
+                  OR items::text ~* '(item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
+                  OR COALESCE($6, 0) >= COALESCE(item_count, 0))
                 THEN $7::jsonb
               ELSE items
             END,
