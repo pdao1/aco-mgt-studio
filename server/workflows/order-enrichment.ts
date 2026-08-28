@@ -88,7 +88,7 @@ function normalizeEnrichedItems(value: unknown): ParsedOrderItem[] {
   return value.slice(0, 50).flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return [];
     const item = entry as Partial<ParsedOrderItem>;
-    if (typeof item.name !== 'string' || item.name.trim().length < 2) return [];
+    if (typeof item.name !== 'string' || item.name.trim().length < 2 || isNonProductItemName(item.name)) return [];
     const quantity = item.quantity === undefined ? 1 : item.quantity;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) return [];
     const unitPriceCents = item.unitPriceCents === null || item.unitPriceCents === undefined ? null : item.unitPriceCents;
@@ -102,6 +102,13 @@ function normalizeEnrichedItems(value: unknown): ParsedOrderItem[] {
       totalCents,
     }];
   });
+}
+
+function isNonProductItemName(value: string): boolean {
+  const name = value.trim();
+  return /https?:\/\/|www\.|\b(?:href|qs)=|click\.oe\.target\.com/i.test(name)
+    || /^(?:view\s+(?:order|cart|details?)(?:\s+(?:order|cart|details?))?|order\s+(?:details|summary)|cancel(?:led|ed)\s+item|more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?)$/i.test(name)
+    || /^(?:video\s+)?games?|toys?(?:\s*&\s*games)?$/i.test(name);
 }
 
 export function buildRedactedEnrichmentInput(input: {

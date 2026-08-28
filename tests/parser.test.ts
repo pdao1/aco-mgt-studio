@@ -260,6 +260,35 @@ describe('parseOrderEmail', () => {
     }]);
   });
 
+  it('bounds standard receipt item sections before totals and navigation', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<receipt-sections@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Order confirmation',
+      text: [
+        'Order number: 102003715051916',
+        'Items 2',
+        'https://click.oe.target.com/?qs=ABCD1234',
+        'Qty 1',
+        'Pokémon Trading Card Game: Mega Zygarde ex Premium Collection',
+        'Qty 1',
+        'Subtotal $46.43',
+        'View order details',
+        'https://click.oe.target.com/?qs=footer',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([{
+      name: 'Pokémon Trading Card Game: Mega Zygarde ex Premium Collection',
+      quantity: 1,
+      unitPriceCents: null,
+      totalCents: null,
+    }]);
+  });
+
   it('does not mark an order cancelled because a product name contains cancellation', () => {
     const parsed = parseOrderEmail({
       messageId: '<noise-cancellation-product@example>',

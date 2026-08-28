@@ -115,7 +115,7 @@ function PortalView({
                   ['in-transit', 'In transit'],
                   ['delivered', 'Completed'],
                   ['pending', 'Pending'],
-                  ['processing', 'Stuck'],
+                  ['processing', 'Processing'],
                   ['cancelled', 'Cancelled'],
                 ] as const).map(([id, label]) => (
                   <button key={id} className={filter === id ? 'portal-filter active' : 'portal-filter'} onClick={() => setFilter(id)} role="tab" aria-selected={filter === id}>
@@ -225,6 +225,6 @@ function percentOf(value: number, total: number) {
 
 function portalStatusLabel(status: OrderStatus) {
   if (status === 'shipped') return 'In transit';
-  if (status === 'processing') return 'Stuck';
+  if (status === 'processing') return 'Processing';
   return status.charAt(0).toUpperCase() + status.slice(1);
 }

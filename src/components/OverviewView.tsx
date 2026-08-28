@@ -12,7 +12,7 @@ interface OverviewViewProps {
 
 export function OverviewView({ customers, orders, onOpenCustomer }: OverviewViewProps) {
   const completed = orders.filter((order) => order.status === 'delivered').length;
-  const stuck = orders.filter((order) => order.status === 'processing').length;
+  const processing = orders.filter((order) => order.status === 'processing').length;
   const cancelled = orders.filter((order) => order.status === 'cancelled').length;
   const chargeableOrders = orders.filter((order) => order.status !== 'cancelled');
   const currencies = new Set(chargeableOrders.map((order) => order.currency));
@@ -36,14 +36,14 @@ export function OverviewView({ customers, orders, onOpenCustomer }: OverviewView
       <section className="overview-metrics" aria-label="Workspace totals">
         <OverviewMetric icon={<Users size={19} />} label="Customers" value={customers.length.toString()} detail="Connected customer inboxes" />
         <OverviewMetric icon={<CheckCircle2 size={19} />} label="Completed" value={completed.toString()} detail={percentOf(completed, orders.length)} tone="green" />
-        <OverviewMetric icon={<AlertTriangle size={19} />} label="Stuck" value={stuck.toString()} detail="Needs attention" tone="amber" />
+        <OverviewMetric icon={<AlertTriangle size={19} />} label="Processing" value={processing.toString()} detail="In progress" tone="amber" />
         <OverviewMetric icon={<XCircle size={19} />} label="Cancelled" value={cancelled.toString()} detail="Excluded from invoices" tone="red" />
         <OverviewMetric icon={<CircleDollarSign size={19} />} label="Service fees" value={serviceFeeLabel} detail={currencies.size > 1 ? 'Multiple currencies' : 'Excludes retailer purchases'} tone="blue" />
       </section>
 
       <section className="overview-attention" aria-labelledby="attention-title">
         <div className="overview-section-heading">
-          <div><h2 id="attention-title">Needs attention</h2><p>Processing and cancelled orders across all customers.</p></div>
+          <div><h2 id="attention-title">Order activity</h2><p>Processing and cancelled orders across all customers.</p></div>
           <span>{attentionOrders.length} shown</span>
         </div>
         {attentionOrders.length === 0 ? (

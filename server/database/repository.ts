@@ -1045,9 +1045,12 @@ export class Repository {
             items = CASE
               WHEN jsonb_array_length(EXCLUDED.items) > 0
                 AND (jsonb_array_length(orders.items) = 0
-                  OR orders.items::text ~* '(item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
+                  OR orders.items::text ~* '(https?://|www[.]|click[.]oe[.]target[.]com|view[[:space:]]+order[[:space:]]+details|cancelled[[:space:]]+item|canceled[[:space:]]+item|item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
                   OR COALESCE(EXCLUDED.item_count, 0) >= COALESCE(orders.item_count, 0))
                 THEN EXCLUDED.items
+              WHEN jsonb_array_length(EXCLUDED.items) = 0
+                AND orders.items::text ~* '(https?://|www[.]|click[.]oe[.]target[.]com|view[[:space:]]+order[[:space:]]+details|cancelled[[:space:]]+item|canceled[[:space:]]+item|item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
+                THEN '[]'::jsonb
               ELSE orders.items
             END,
             status = CASE
@@ -1071,9 +1074,12 @@ export class Repository {
             items = CASE
               WHEN jsonb_array_length($7::jsonb) > 0
                 AND (jsonb_array_length(items) = 0
-                  OR items::text ~* '(item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
+                  OR items::text ~* '(https?://|www[.]|click[.]oe[.]target[.]com|view[[:space:]]+order[[:space:]]+details|cancelled[[:space:]]+item|canceled[[:space:]]+item|item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
                   OR COALESCE($6, 0) >= COALESCE(item_count, 0))
                 THEN $7::jsonb
+              WHEN jsonb_array_length($7::jsonb) = 0
+                AND items::text ~* '(https?://|www[.]|click[.]oe[.]target[.]com|view[[:space:]]+order[[:space:]]+details|cancelled[[:space:]]+item|canceled[[:space:]]+item|item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
+                THEN '[]'::jsonb
               ELSE items
             END,
             updated_at = now(), source_message_key = $8
@@ -1263,6 +1269,7 @@ function normalizeStoredOrderItems(value: unknown): ParsedOrderItem[] {
     if (!entry || typeof entry !== 'object') return [];
     const item = entry as Partial<ParsedOrderItem>;
     if (typeof item.name !== 'string' || item.name.trim().length < 2) return [];
+    if (isStoredNonProductName(item.name)) return [];
     const quantity = item.quantity;
     if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) return [];
     const unitPriceCents = item.unitPriceCents === null || item.unitPriceCents === undefined ? null : item.unitPriceCents;
@@ -1276,6 +1283,13 @@ function normalizeStoredOrderItems(value: unknown): ParsedOrderItem[] {
       totalCents,
     }];
   });
+}
+
+function isStoredNonProductName(value: string): boolean {
+  const name = value.trim();
+  return /https?:\/\/|www\.|\b(?:href|qs)=|click\.oe\.target\.com/i.test(name)
+    || /^(?:view\s+(?:order|cart|details?)(?:\s+(?:order|cart|details?))?|order\s+(?:details|summary)|cancel(?:led|ed)\s+item|more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?)$/i.test(name)
+    || /^(?:video\s+)?games?|toys?(?:\s*&\s*games)?$/i.test(name);
 }
 
 function resolveFeeBasisCents(

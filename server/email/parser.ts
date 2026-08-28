@@ -191,7 +191,8 @@ function parseExpectedDelivery(text: string, receivedAt: Date): Date | null {
 }
 
 function parseItems(text: string): ParsedOrderItem[] {
-  const lines = text.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const rawLines = text.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const lines = boundReceiptItemSection(rawLines);
   const items: ParsedOrderItem[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -234,6 +235,19 @@ function parseItems(text: string): ParsedOrderItem[] {
     if (!deduplicated.has(key)) deduplicated.set(key, item);
   }
   return [...deduplicated.values()].slice(0, 50);
+}
+
+/**
+ * Retailer receipts follow the same broad structure: order header, purchased
+ * line items, then totals/fulfillment and navigation. Once an item section is
+ * identifiable, do not let footer links or summary labels become candidates.
+ * Fixtures without a heading continue to use the conservative row parser.
+ */
+function boundReceiptItemSection(lines: string[]): string[] {
+  const start = lines.findIndex((line) => /^(?:items?|products?)\s*(?:purchased|ordered)?(?:\s*[:#-]?\s*\d{1,3})?$/i.test(line));
+  if (start < 0) return lines;
+  const end = lines.slice(start + 1).findIndex((line) => /^(?:subtotal|shipping|delivery|tax|grand\s+total|order\s+total|payment|billing|view\s+(?:order|cart|details?)|cancel(?:led|ed)\s+item)\b/i.test(line));
+  return end < 0 ? lines.slice(start) : lines.slice(start, start + 1 + end);
 }
 
 function parseItemLine(value: string, labelled: boolean, adjacentDetails: string): ParsedOrderItem | null {

@@ -28,7 +28,7 @@ Stripe/Venmo payment links when configured.
 
 ## Product surfaces
 
-- **Overview**: customer count, completed orders, stuck orders, cancelled
+- **Overview**: customer count, completed orders, processing orders, cancelled
   orders, ACO service fees, and a short needs-attention list.
 - **Customers**: one customer rail; the selected customer shows order status
   filters, search, tracking, fees, billing state, timeline, and manual status
@@ -220,7 +220,7 @@ its credentials in server-only environment variables.
 - [ ] A fresh database and browser show empty states, not seeded records.
 - [ ] Operator can connect a Gmail inbox, sync it, and see only that
   customer's orders.
-- [ ] Completed, stuck, cancelled, shipped, and confirmed filters work; a
+- [ ] Completed, pending, cancelled, shipped, and confirmed filters work; a
   manual status override appears in both operator and customer timelines.
 - [ ] Checkout-total and custom-amount fee edits recalculate the service fee
   and draft fee-only invoice line in one transaction, then are rejected after

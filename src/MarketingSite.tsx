@@ -15,7 +15,7 @@ export default function MarketingSite() {
       </section>
       <section className="marketing-grid" id="how-it-works">
         <article><Mail size={20} /><h2>Mailbox to dashboard</h2><p>Orders and shipment updates are parsed from each customer’s Gmail inbox.</p></article>
-        <article><CheckCircle2 size={20} /><h2>Exceptions at a glance</h2><p>See completed, stuck, cancelled, and in-transit orders without opening every account.</p></article>
+        <article><CheckCircle2 size={20} /><h2>Order activity at a glance</h2><p>See completed, processing, cancelled, and in-transit orders without opening every account.</p></article>
         <article><ShieldCheck size={20} /><h2>Service-fee billing</h2><p>Invoice only your configured checkout fees, with Stripe and optional Venmo payment links.</p></article>
       </section>
       <footer className="marketing-footer">Private customer links · Workspace-level isolation · Built for ACO operators</footer>

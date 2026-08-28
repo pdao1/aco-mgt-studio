@@ -11,7 +11,7 @@ export function SummaryStrip({ orders, activeStatus, onSelect }: SummaryStripPro
   const summaries = [
     { id: 'all' as const, label: 'All orders', icon: ShoppingBag, value: orders.length },
     { id: 'delivered' as const, label: 'Completed', icon: CheckCircle2, value: orders.filter((order) => order.status === 'delivered').length },
-    { id: 'processing' as const, label: 'Stuck', icon: AlertTriangle, value: orders.filter((order) => order.status === 'processing').length },
+    { id: 'processing' as const, label: 'Processing', icon: AlertTriangle, value: orders.filter((order) => order.status === 'processing').length },
     { id: 'cancelled' as const, label: 'Cancelled', icon: XCircle, value: orders.filter((order) => order.status === 'cancelled').length },
   ];
 
