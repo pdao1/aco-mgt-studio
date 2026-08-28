@@ -2,6 +2,7 @@ services:
   - type: web
     name: aco-studio
     runtime: node
+    plan: free
     buildCommand: npm ci --legacy-peer-deps && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm start
@@ -63,3 +64,4 @@ databases:
   - name: aco-studio-db
     databaseName: aco_studio
     user: aco_studio
+    plan: free
