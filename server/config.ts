@@ -1,0 +1,106 @@
+import 'dotenv/config';
+import { z } from 'zod';
+
+const optionalSecret = z.preprocess(
+  (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+  z.string().min(1).optional(),
+);
+const booleanFromEnv = z.preprocess(
+  (value) => typeof value === 'string' ? ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()) : value,
+  z.boolean(),
+);
+
+const schema = z.object({
+  DATABASE_URL: z.string().min(1),
+  MAILBOX_ENCRYPTION_KEY: z.string().min(1),
+  OPERATOR_PASSWORD: z.string().min(12),
+  SESSION_SECRET: z.string().min(24),
+  PORTAL_SECRET: z.string().min(24),
+  STRIPE_SECRET_KEY: optionalSecret,
+  STRIPE_WEBHOOK_SECRET: optionalSecret,
+  STRIPE_DUE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+  SERVICE_SERIAL: z.string().min(12),
+  SUPER_ADMIN_SERIAL: optionalSecret,
+  SMTP_HOST: optionalSecret,
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: booleanFromEnv.default(false),
+  SMTP_USER: optionalSecret,
+  SMTP_PASSWORD: optionalSecret,
+  SMTP_FROM: optionalSecret,
+  NOTIFICATION_SELLER_EMAIL: optionalSecret,
+  VENMO_PAYMENT_URL: optionalSecret,
+  WORKSPACE_NAME: z.string().min(1).default('ACO Studio'),
+  WORKSPACE_SLUG: z.string().regex(/^[a-z0-9-]+$/).default('default'),
+  PORT: z.coerce.number().int().positive().default(3001),
+  APP_ORIGIN: z.string().url().default('http://localhost:5173'),
+  SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
+  SYNC_MAX_MESSAGES: z.coerce.number().int().min(1).max(5000).default(500),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+});
+
+export type AppConfig = {
+  databaseUrl: string;
+  mailboxEncryptionKey: string;
+  operatorPassword: string;
+  sessionSecret: string;
+  portalSecret: string;
+  stripeSecretKey: string | null;
+  stripeWebhookSecret: string | null;
+  stripeDueDays: number;
+  serviceSerial: string;
+  superAdminSerial: string | null;
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string | null;
+  smtpPassword: string | null;
+  smtpFrom: string | null;
+  notificationSellerEmail: string | null;
+  venmoPaymentUrl: string | null;
+  workspaceName: string;
+  workspaceSlug: string;
+  port: number;
+  appOrigin: string;
+  syncIntervalMinutes: number;
+  syncMaxMessages: number;
+  nodeEnv: 'development' | 'test' | 'production';
+};
+
+export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
+  const parsed = schema.safeParse(environment);
+  if (!parsed.success) {
+    const fields = parsed.error.issues.map((issue) => issue.path.join('.')).join(', ');
+    throw new Error(`Missing or invalid server configuration: ${fields}`);
+  }
+  const value = parsed.data;
+  if (value.NODE_ENV === 'production' && !value.APP_ORIGIN.startsWith('https://')) {
+    throw new Error('APP_ORIGIN must use HTTPS in production so customer portal links are secure.');
+  }
+  return {
+    databaseUrl: value.DATABASE_URL,
+    mailboxEncryptionKey: value.MAILBOX_ENCRYPTION_KEY,
+    operatorPassword: value.OPERATOR_PASSWORD,
+    sessionSecret: value.SESSION_SECRET,
+    portalSecret: value.PORTAL_SECRET,
+    stripeSecretKey: value.STRIPE_SECRET_KEY ?? null,
+    stripeWebhookSecret: value.STRIPE_WEBHOOK_SECRET ?? null,
+    stripeDueDays: value.STRIPE_DUE_DAYS,
+    serviceSerial: value.SERVICE_SERIAL,
+    superAdminSerial: value.SUPER_ADMIN_SERIAL ?? null,
+    smtpHost: value.SMTP_HOST ?? null,
+    smtpPort: value.SMTP_PORT,
+    smtpSecure: value.SMTP_SECURE,
+    smtpUser: value.SMTP_USER ?? null,
+    smtpPassword: value.SMTP_PASSWORD ?? null,
+    smtpFrom: value.SMTP_FROM ?? null,
+    notificationSellerEmail: value.NOTIFICATION_SELLER_EMAIL ?? null,
+    venmoPaymentUrl: value.VENMO_PAYMENT_URL ?? null,
+    workspaceName: value.WORKSPACE_NAME,
+    workspaceSlug: value.WORKSPACE_SLUG,
+    port: value.PORT,
+    appOrigin: value.APP_ORIGIN.replace(/\/$/, ''),
+    syncIntervalMinutes: value.SYNC_INTERVAL_MINUTES,
+    syncMaxMessages: value.SYNC_MAX_MESSAGES,
+    nodeEnv: value.NODE_ENV,
+  };
+}

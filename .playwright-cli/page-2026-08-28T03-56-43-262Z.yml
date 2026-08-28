@@ -1,0 +1,5 @@
+- main [ref=f2e3]:
+  - heading "Owner console reserved" [level=1] [ref=f2e7]
+  - paragraph [ref=f2e8]: This route is reserved for the ACO Studio service owner.
+  - link "Return to operator sign in" [ref=f2e9] [cursor=pointer]:
+    - /url: /app/dashboard

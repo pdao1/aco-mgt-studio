@@ -1,0 +1,57 @@
+{
+  "name": "aco-management-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "npm run setup:local",
+    "dev": "npm run db:up && npm run dev:live",
+    "dev:live": "concurrently -k \"npm:server:dev\" \"npm:vite:live\"",
+    "dev:web": "vite",
+    "vite:live": "vite --mode live",
+    "server:dev": "tsx watch server/index.ts",
+    "setup:local": "tsx server/setup-local.ts",
+    "db:up": "tsx server/start-local-database.ts",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "tsx server/index.ts",
+    "db:migrate": "tsx server/database/migrate.ts"
+  },
+  "dependencies": {
+    "@types/nodemailer": "^8.0.1",
+    "cookie-parser": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "helmet": "latest",
+    "imapflow": "latest",
+    "lucide-react": "latest",
+    "mailparser": "latest",
+    "nodemailer": "^9.0.6",
+    "pg": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-icons": "^5.7.0",
+    "stripe": "^22.6.0",
+    "tsx": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "latest",
+    "@types/express": "latest",
+    "@types/mailparser": "latest",
+    "@types/node": "latest",
+    "@types/pg": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  },
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
+  }
+}

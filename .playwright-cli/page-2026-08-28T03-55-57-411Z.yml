@@ -1,0 +1,26 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - link [ref=e5] [cursor=pointer]:
+      - /url: /
+    - link "Operator sign in" [ref=e17] [cursor=pointer]:
+      - /url: /app/dashboard
+  - generic [ref=e20]:
+    - generic [ref=e21]: Order operations for ACO teams
+    - heading "One clear view of every customer order." [level=1] [ref=e25]
+    - paragraph [ref=e26]: Connect customer Gmail inboxes, track retailer shipments, and bill service fees without asking customers to hand over their purchase cards.
+    - generic [ref=e27]:
+      - link "Open your workspace" [ref=e28] [cursor=pointer]:
+        - /url: /app/dashboard
+      - link "See how it works" [ref=e31] [cursor=pointer]:
+        - /url: "#how-it-works"
+  - generic [ref=e32]:
+    - article [ref=e33]:
+      - heading "Mailbox to dashboard" [level=2] [ref=e37]
+      - paragraph [ref=e38]: Orders and shipment updates are parsed from each customer’s Gmail inbox.
+    - article [ref=e39]:
+      - heading "Exceptions at a glance" [level=2] [ref=e43]
+      - paragraph [ref=e44]: See completed, stuck, cancelled, and in-transit orders without opening every account.
+    - article [ref=e45]:
+      - heading "Service-fee billing" [level=2] [ref=e49]
+      - paragraph [ref=e50]: Invoice only your configured checkout fees, with Stripe and optional Venmo payment links.
+  - generic [ref=e51]: Private customer links · Workspace-level isolation · Built for ACO operators

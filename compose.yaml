@@ -1,0 +1,53 @@
+services:
+  database:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    environment:
+      POSTGRES_DB: aco_studio
+      POSTGRES_USER: aco_studio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aco_studio -d aco_studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - aco_postgres:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://aco_studio:${POSTGRES_PASSWORD:-local-development-only}@database:5432/aco_studio
+      MAILBOX_ENCRYPTION_KEY: ${MAILBOX_ENCRYPTION_KEY:?Set MAILBOX_ENCRYPTION_KEY in .env}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:?Set OPERATOR_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      PORTAL_SECRET: ${PORTAL_SECRET:?Set PORTAL_SECRET in .env}
+      SERVICE_SERIAL: ${SERVICE_SERIAL:?Set SERVICE_SERIAL in .env}
+      SUPER_ADMIN_SERIAL: ${SUPER_ADMIN_SERIAL:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_DUE_DAYS: ${STRIPE_DUE_DAYS:-7}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      NOTIFICATION_SELLER_EMAIL: ${NOTIFICATION_SELLER_EMAIL:-}
+      VENMO_PAYMENT_URL: ${VENMO_PAYMENT_URL:-}
+      APP_ORIGIN: http://localhost:3001
+      WORKSPACE_NAME: ACO Studio
+      WORKSPACE_SLUG: default
+      PORT: 3001
+      NODE_ENV: development
+      SYNC_INTERVAL_MINUTES: 5
+      SYNC_MAX_MESSAGES: 500
+
+volumes:
+  aco_postgres:
