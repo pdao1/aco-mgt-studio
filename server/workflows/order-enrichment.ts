@@ -1,4 +1,4 @@
-import type { ParsedOrderEmail } from '../email/parser.js';
+import type { ParsedOrderEmail, ParsedOrderItem } from '../email/parser.js';
 
 export interface OrderEnrichmentInput {
   messageKey: string;
@@ -34,6 +34,9 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
   if (candidate.orderNumber !== null && candidate.orderNumber !== undefined && typeof candidate.orderNumber !== 'string') return null;
   if (candidate.trackingNumber !== null && candidate.trackingNumber !== undefined && typeof candidate.trackingNumber !== 'string') return null;
   if (candidate.totalCents !== null && candidate.totalCents !== undefined && (!Number.isInteger(candidate.totalCents) || candidate.totalCents < 0)) return null;
+  if (candidate.itemCount !== null && candidate.itemCount !== undefined && (!Number.isInteger(candidate.itemCount) || candidate.itemCount < 0 || candidate.itemCount > 10_000)) return null;
+  if (candidate.items !== null && candidate.items !== undefined && !Array.isArray(candidate.items)) return null;
+  const items = normalizeEnrichedItems(candidate.items);
   const orderedAt = candidate.orderedAt instanceof Date ? candidate.orderedAt : new Date(String(candidate.orderedAt ?? fallback.receivedAt.toISOString()));
   if (Number.isNaN(orderedAt.getTime())) return null;
   const orderNumber = typeof candidate.orderNumber === 'string' ? candidate.orderNumber.trim().toUpperCase() : null;
@@ -53,7 +56,30 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
     trackingUrl: typeof candidate.trackingUrl === 'string' && /^https?:\/\//i.test(candidate.trackingUrl) ? candidate.trackingUrl.slice(0, 1000) : null,
     expectedDelivery: candidate.expectedDelivery instanceof Date && !Number.isNaN(candidate.expectedDelivery.getTime()) ? candidate.expectedDelivery : null,
     orderedAt,
+    itemCount: items.length > 0 ? items.reduce((total, item) => total + item.quantity, 0) : candidate.itemCount ?? null,
+    items,
   };
+}
+
+function normalizeEnrichedItems(value: unknown): ParsedOrderItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const item = entry as Partial<ParsedOrderItem>;
+    if (typeof item.name !== 'string' || item.name.trim().length < 2) return [];
+    const quantity = item.quantity === undefined ? 1 : item.quantity;
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) return [];
+    const unitPriceCents = item.unitPriceCents === null || item.unitPriceCents === undefined ? null : item.unitPriceCents;
+    const totalCents = item.totalCents === null || item.totalCents === undefined ? null : item.totalCents;
+    if ((unitPriceCents !== null && (!Number.isInteger(unitPriceCents) || unitPriceCents < 0))
+      || (totalCents !== null && (!Number.isInteger(totalCents) || totalCents < 0))) return [];
+    return [{
+      name: item.name.trim().slice(0, 240),
+      quantity,
+      unitPriceCents,
+      totalCents,
+    }];
+  });
 }
 
 export function buildRedactedEnrichmentInput(input: {

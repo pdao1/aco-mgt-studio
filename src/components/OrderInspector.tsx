@@ -112,6 +112,18 @@ export function OrderInspector({ order, customerName, onClose, onFeeSave, onOver
         <div><dt>Customer</dt><dd>{customerName}</dd></div>
       </dl>
 
+      <section className="order-items-section" aria-labelledby="order-items-title">
+        <div className="order-items-heading"><h3 id="order-items-title">Items purchased</h3><span>{order.itemCount ? `${order.itemCount} ${order.itemCount === 1 ? 'item' : 'items'}` : 'Details pending'}</span></div>
+        {order.items?.length ? (
+          <ul className="order-items-list">
+            {order.items.map((item, index) => {
+              const lineTotal = item.totalCents ?? (item.unitPriceCents === null ? null : item.unitPriceCents * item.quantity);
+              return <li key={`${item.name}-${index}`}><span><strong>{item.name}</strong><small>Qty {item.quantity}{item.unitPriceCents !== null ? ` · ${formatMoney(item.unitPriceCents, order.currency)} each` : ''}</small></span><b>{formatMoney(lineTotal, order.currency)}</b></li>;
+            })}
+          </ul>
+        ) : <p className="order-items-empty">Item details will appear after a confirmation email with line items is synchronized.</p>}
+      </section>
+
       <form className="fee-section" onSubmit={saveFee}>
         <div className="fee-section-heading"><h3>Customer fee</h3><span>Per order</span></div>
         <div className="fee-control-grid">

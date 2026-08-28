@@ -73,4 +73,10 @@ describe('PostgreSQL tenant and privacy schema', () => {
     expect(sql).toContain('orders_customer_order_number_idx');
     expect(sql).toContain('ON orders(workspace_id, customer_id, order_number)');
   });
+
+  it('stores bounded order line items for the order detail view', async () => {
+    const sql = await readFile(new URL('../server/database/migrations/007_order_items.sql', import.meta.url), 'utf8');
+    expect(sql).toContain("items jsonb NOT NULL DEFAULT '[]'::jsonb");
+    expect(sql).toContain("jsonb_typeof(items) = 'array'");
+  });
 });

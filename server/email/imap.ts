@@ -62,10 +62,10 @@ export class MailboxSyncCoordinator {
     for (const customerId of customerIds) this.enqueue(customerId);
   }
 
-  enqueue(customerId: string): boolean {
+  enqueue(customerId: string, options: { fullHistory?: boolean } = {}): boolean {
     if (this.active.has(customerId)) return false;
     this.active.add(customerId);
-    void this.syncOne(customerId).finally(() => this.active.delete(customerId));
+    void this.syncOne(customerId, options.fullHistory === true).finally(() => this.active.delete(customerId));
     return true;
   }
 
@@ -73,7 +73,7 @@ export class MailboxSyncCoordinator {
     return this.active.has(customerId);
   }
 
-  private async syncOne(customerId: string) {
+  private async syncOne(customerId: string, fullHistory = false) {
     const mailbox = await this.repository.getMailbox(this.workspaceId, customerId);
     if (!mailbox) return;
 
@@ -90,7 +90,7 @@ export class MailboxSyncCoordinator {
       const mailboxPath = allMail?.path ?? 'INBOX';
       const lock = await client.getMailboxLock(mailboxPath, { readOnly: true, description: 'order synchronization' });
       try {
-        const since = mailbox.lastSyncedAt
+        const since = !fullHistory && mailbox.lastSyncedAt
           ? new Date(mailbox.lastSyncedAt.getTime() - 24 * 60 * 60 * 1000)
           : new Date(Date.now() - mailbox.syncDays * 24 * 60 * 60 * 1000);
         const after = since.toISOString().slice(0, 10).replace(/-/g, '/');

@@ -46,6 +46,13 @@ export interface OrderEvent {
   occurredAt: string;
 }
 
+export interface OrderItem {
+  name: string;
+  quantity: number;
+  unitPriceCents: number | null;
+  totalCents: number | null;
+}
+
 export interface Order {
   id: string;
   customerId: string;
@@ -66,6 +73,7 @@ export interface Order {
   currency: string;
   status: OrderStatus;
   itemCount: number | null;
+  items: OrderItem[];
   carrier: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;

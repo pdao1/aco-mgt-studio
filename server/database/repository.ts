@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import pg, { type PoolClient } from 'pg';
-import type { ParsedOrderEmail, ParsedOrderStatus } from '../email/parser.js';
+import type { ParsedOrderEmail, ParsedOrderItem, ParsedOrderStatus } from '../email/parser.js';
 import { SecretBox } from '../security/secret-box.js';
 
 const { Pool } = pg;
@@ -208,6 +208,7 @@ export class Repository {
         fee_basis: FeeBasis;
         custom_fee_basis_cents: number | null;
         item_count: number | null;
+        items: unknown;
         currency: string;
         status: ParsedOrderStatus;
         status_override: ParsedOrderStatus | null;
@@ -222,7 +223,7 @@ export class Repository {
       }>(`
         SELECT o.id, o.customer_id, o.merchant, o.order_number, o.ordered_at,
                o.total_cents, o.fee_basis_points, o.fee_basis, o.custom_fee_basis_cents,
-               o.item_count, o.currency, o.status,
+               o.item_count, o.items, o.currency, o.status,
                o.status_override, o.override_note, o.override_updated_at, o.billing_invoice_id,
                i.status AS billing_status,
                s.carrier, s.tracking_number, s.tracking_url, s.expected_delivery
@@ -317,6 +318,7 @@ export class Repository {
             isManualOverride: Boolean(order.status_override),
             overrideNote: order.override_note,
             itemCount: order.item_count,
+            items: normalizeStoredOrderItems(order.items),
             currency: order.currency.trim(),
             status: effectiveStatus,
             carrier: order.carrier,
@@ -902,7 +904,14 @@ export class Repository {
         randomUUID(), workspaceId, customerId, meta.messageKey,
         extractDomain(meta.fromAddress), meta.subject.slice(0, 500), meta.receivedAt, Boolean(parsed),
       ]);
-      if (processed.rowCount === 0 || !parsed) return false;
+      if (!parsed) return false;
+
+      // A full-history sync may revisit a message that was already marked as
+      // processed before item extraction existed. Reprocess only when the
+      // message now contains useful order details so the new item overview
+      // can be backfilled without duplicating ordinary messages.
+      if (processed.rowCount === 0
+        && (parsed.items.length === 0 || (!parsed.orderNumber && !parsed.trackingNumber))) return false;
 
       let orderId: string | null = null;
       if (parsed.orderNumber) {
@@ -929,11 +938,19 @@ export class Repository {
         const orderResult = await client.query<{ id: string }>(`
           INSERT INTO orders(
             id, workspace_id, customer_id, merchant, order_number, ordered_at,
-            total_cents, currency, status, source_message_key
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            total_cents, item_count, items, currency, status, source_message_key
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (workspace_id, customer_id, merchant, order_number) DO UPDATE SET
             ordered_at = LEAST(orders.ordered_at, EXCLUDED.ordered_at),
             total_cents = COALESCE(EXCLUDED.total_cents, orders.total_cents),
+            item_count = COALESCE(EXCLUDED.item_count, orders.item_count),
+            items = CASE
+              WHEN jsonb_array_length(EXCLUDED.items) > 0
+                AND (jsonb_array_length(orders.items) = 0
+                  OR COALESCE(EXCLUDED.item_count, 0) >= COALESCE(orders.item_count, 0))
+                THEN EXCLUDED.items
+              ELSE orders.items
+            END,
             status = CASE
               WHEN status_rank(EXCLUDED.status) >= status_rank(orders.status) THEN EXCLUDED.status
               ELSE orders.status
@@ -943,16 +960,24 @@ export class Repository {
           RETURNING id
         `, [
           candidateId, workspaceId, customerId, parsed.merchant, orderNumber, parsed.orderedAt,
-          parsed.totalCents, parsed.currency, parsed.status, parsed.messageKey,
+          parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.currency, parsed.status, parsed.messageKey,
         ]);
         orderId = orderResult.rows[0].id;
       } else {
         await client.query(`
           UPDATE orders SET
             status = CASE WHEN status_rank($4) >= status_rank(status) THEN $4 ELSE status END,
-            total_cents = COALESCE($5, total_cents), updated_at = now(), source_message_key = $6
+            total_cents = COALESCE($5, total_cents),
+            item_count = COALESCE($6, item_count),
+            items = CASE
+              WHEN jsonb_array_length($7::jsonb) > 0
+                AND (jsonb_array_length(items) = 0 OR COALESCE($6, 0) >= COALESCE(item_count, 0))
+                THEN $7::jsonb
+              ELSE items
+            END,
+            updated_at = now(), source_message_key = $8
           WHERE workspace_id = $1 AND customer_id = $2 AND id = $3
-        `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.messageKey]);
+        `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.messageKey]);
       }
 
       if (parsed.trackingNumber) {
@@ -1128,6 +1153,27 @@ function maskEmail(email: string): string {
 
 function extractDomain(email: string): string | null {
   return email.split('@')[1]?.toLowerCase() ?? null;
+}
+
+function normalizeStoredOrderItems(value: unknown): ParsedOrderItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const item = entry as Partial<ParsedOrderItem>;
+    if (typeof item.name !== 'string' || item.name.trim().length < 2) return [];
+    const quantity = item.quantity;
+    if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) return [];
+    const unitPriceCents = item.unitPriceCents === null || item.unitPriceCents === undefined ? null : item.unitPriceCents;
+    const totalCents = item.totalCents === null || item.totalCents === undefined ? null : item.totalCents;
+    if ((unitPriceCents !== null && (!Number.isInteger(unitPriceCents) || unitPriceCents < 0))
+      || (totalCents !== null && (!Number.isInteger(totalCents) || totalCents < 0))) return [];
+    return [{
+      name: item.name.trim().slice(0, 240),
+      quantity,
+      unitPriceCents,
+      totalCents,
+    }];
+  });
 }
 
 function resolveFeeBasisCents(

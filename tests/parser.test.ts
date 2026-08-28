@@ -98,6 +98,41 @@ describe('parseOrderEmail', () => {
     });
   });
 
+  it('extracts a compact item overview from labelled retailer lines', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<items@example>',
+      fromAddress: 'orders@nike.com',
+      fromName: 'Nike Orders',
+      subject: 'Your order is confirmed',
+      text: 'Order number: NK-12001\nProduct: Air Max 90\nQty: 2\n$120.00\nProduct: Crew Socks | Qty: 1 | Line total: $18.00\nOrder total: $258.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.itemCount).toBe(3);
+    expect(parsed?.items).toEqual([
+      { name: 'Air Max 90', quantity: 2, unitPriceCents: 12000, totalCents: null },
+      { name: 'Crew Socks', quantity: 1, unitPriceCents: null, totalCents: 1800 },
+    ]);
+  });
+
+  it('handles item, quantity, and price split across retailer table lines', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<table-items@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Order confirmation',
+      text: 'Order number: TG-12001\nAir Max 90\nQty\n2\n$120.00\nCrew Socks\nQty\n1\n$18.00\nOrder total: $258.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([
+      { name: 'Air Max 90', quantity: 2, unitPriceCents: 12000, totalCents: null },
+      { name: 'Crew Socks', quantity: 1, unitPriceCents: 1800, totalCents: null },
+    ]);
+  });
+
   it('only treats long numeric values as FedEx tracking when tracking context is present', () => {
     const parsed = parseOrderEmail({
       messageId: '<fedex@example>',

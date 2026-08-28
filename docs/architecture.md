@@ -19,6 +19,7 @@ Stripe/Venmo payment links when configured.
 | Payment | Stripe Invoicing creates a hosted payment page. An optional workspace Venmo URL is shown as an external manual-payment option. Stripe webhook event IDs are stored before applying a state transition. |
 | Access | A server-side `SERVICE_SERIAL` unlocks a signed, HttpOnly access cookie. Operator sessions remain separate and are still required. |
 | Notifications | Optional SMTP delivery is queued outside request handlers for invoice-created (buyer) and invoice-paid (buyer + seller) notices. |
+| Order detail | Parsed line items are stored as bounded JSON on the customer-scoped order and rendered in both the operator inspector and customer portal detail view. |
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
 | Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It searches order/shipment mail plus cancellation/refund notices, matches known customer order numbers, and applies cancellation events idempotently. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
 | AI | Deterministic parsing runs first. The optional enrichment provider receives only a redacted, bounded excerpt and must return data that the workflow validates before loading. No model is enabled by default. |

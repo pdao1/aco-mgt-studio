@@ -188,6 +188,17 @@ function PortalOrderDetail({ order, onClose }: { order: Order; onClose: () => vo
     <aside className="portal-detail" aria-label={`Order ${order.orderNumber}`}>
       <div className="portal-detail-heading"><div><h2>Order #{order.orderNumber}</h2><span className={`portal-status ${order.status}`}>{portalStatusLabel(order.status)}</span></div><button className="portal-close" onClick={onClose} aria-label="Close order details"><X size={19} /></button></div>
       <div className="portal-detail-store"><StoreMark store={order.store} /><div><strong>{order.store}</strong><span>{formatDateTime(order.orderedAt)}</span></div></div>
+      <section className="portal-items-section" aria-labelledby="portal-items-title">
+        <div className="portal-items-heading"><h3 id="portal-items-title">Items purchased</h3><span>{order.itemCount ? `${order.itemCount} ${order.itemCount === 1 ? 'item' : 'items'}` : 'Details pending'}</span></div>
+        {order.items?.length ? (
+          <ul className="portal-items-list">
+            {order.items.map((item, index) => {
+              const lineTotal = item.totalCents ?? (item.unitPriceCents === null ? null : item.unitPriceCents * item.quantity);
+              return <li key={`${item.name}-${index}`}><span><strong>{item.name}</strong><small>Qty {item.quantity}{item.unitPriceCents !== null ? ` · ${formatMoney(item.unitPriceCents, order.currency)} each` : ''}</small></span><b>{formatMoney(lineTotal, order.currency)}</b></li>;
+            })}
+          </ul>
+        ) : <p className="portal-items-empty">Item details will appear when the retailer includes line items in a confirmation email.</p>}
+      </section>
       <section className="portal-activity"><h3>Order timeline</h3><ol className="portal-timeline">{order.events.map((event, index) => <li key={event.id} className={index === order.events.length - 1 ? 'last' : ''}><span className="portal-timeline-node" /><div><strong>{event.label}</strong><time>{formatDateTime(event.occurredAt)}</time><p>{event.detail}</p></div></li>)}</ol></section>
       <section className="portal-fee-breakdown"><h3>Fee breakdown</h3><div><span>Customer-paid purchase</span><strong>{formatMoney(order.totalCents, order.currency)}</strong></div><div><span>{order.feeBasis === 'checkout_total' ? 'Checkout fee basis' : 'Custom fee basis'}</span><strong>{formatMoney(order.feeBasisCents, order.currency)}</strong></div><div className="portal-total-row"><span>Service fee ({formatPercent(order.feePercent)})</span><strong>{formatMoney(order.feeCents, order.currency)}</strong></div></section>
       <div className="portal-privacy-note"><ShieldCheck size={16} /><div><strong>Secure & private</strong><p>This link is unique to you. Do not share it with others.</p></div></div>

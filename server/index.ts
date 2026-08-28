@@ -353,7 +353,10 @@ app.post('/api/customers/:customerId/sync', async (request, response) => {
     response.status(404).json({ error: 'CUSTOMER_NOT_FOUND', message: 'Customer not found.' });
     return;
   }
-  syncCoordinator.enqueue(request.params.customerId);
+  // A manual sync is an intentional repair/backfill operation. It scans the
+  // customer's configured history so new item/cancellation parsers can repair
+  // messages that were previously marked as processed.
+  syncCoordinator.enqueue(request.params.customerId, { fullHistory: true });
   response.status(202).json({ accepted: true });
 });
 

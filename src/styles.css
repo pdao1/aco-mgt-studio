@@ -989,6 +989,20 @@ tr:focus-visible {
 .order-facts dt { color: #778196; }
 .order-facts dd { display: flex; align-items: center; color: #303a4d; text-align: right; }
 
+.order-items-section { padding: 23px 0 24px; border-bottom: 1px solid var(--line); }
+.order-items-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.order-items-heading h3 { margin: 0; color: #1f293b; font-size: 13px; font-weight: 700; }
+.order-items-heading span { color: var(--muted); font-size: 10px; }
+.order-items-list { margin: 0; padding: 0; list-style: none; }
+.order-items-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid #edf0f4; }
+.order-items-list li:first-child { border-top: 0; padding-top: 0; }
+.order-items-list li:last-child { padding-bottom: 0; }
+.order-items-list li > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.order-items-list strong { color: #303a4d; font-size: 11.5px; font-weight: 650; overflow-wrap: anywhere; }
+.order-items-list small { color: #7a8596; font-size: 10px; }
+.order-items-list b { flex: 0 0 auto; color: #303a4d; font-size: 11px; font-weight: 650; }
+.order-items-empty { margin: 0; color: #7a8596; font-size: 10.5px; line-height: 1.5; }
+
 .copy-button {
   display: inline-grid;
   place-items: center;
@@ -2085,6 +2099,19 @@ tr:focus-visible {
 .portal-detail-store div { display: flex; flex-direction: column; gap: 5px; }
 .portal-detail-store strong { color: #18382b; font-size: 14px; }
 .portal-detail-store span { color: #73827a; font-size: 11px; }
+.portal-items-section { padding: 0 0 20px; border-bottom: 1px solid var(--portal-line); }
+.portal-items-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.portal-items-heading h3 { margin: 0; color: #29463a; font-size: 13px; }
+.portal-items-heading span { color: #7b8981; font-size: 10px; }
+.portal-items-list { margin: 0; padding: 0; list-style: none; }
+.portal-items-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #edf1eb; }
+.portal-items-list li:first-child { padding-top: 0; border-top: 0; }
+.portal-items-list li:last-child { padding-bottom: 0; }
+.portal-items-list li > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.portal-items-list strong { color: #29463a; font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
+.portal-items-list small { color: #7b8981; font-size: 9.5px; }
+.portal-items-list b { flex: 0 0 auto; color: #30463b; font-size: 11px; font-weight: 650; }
+.portal-items-empty { margin: 0; color: #7b8981; font-size: 10.5px; line-height: 1.5; }
 .portal-activity { padding: 0 0 7px; }
 .portal-activity h3,
 .portal-fee-breakdown h3 { margin: 0 0 19px; color: #29463a; font-size: 13px; }

@@ -24,6 +24,15 @@ export interface ParsedOrderEmail {
   trackingUrl: string | null;
   expectedDelivery: Date | null;
   orderedAt: Date;
+  itemCount: number | null;
+  items: ParsedOrderItem[];
+}
+
+export interface ParsedOrderItem {
+  name: string;
+  quantity: number;
+  unitPriceCents: number | null;
+  totalCents: number | null;
 }
 
 export interface EmailParseContext {
@@ -67,6 +76,7 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
   const status = parseStatus(input.subject, plain);
   const orderNumber = firstOrderNumber(plain) ?? findKnownOrderNumber(plain, context.knownOrderNumbers ?? []);
   const tracking = findTracking(plain);
+  const items = parseItems(plain);
   const messageKey = input.messageId?.trim() || createHash('sha256')
     .update(`${input.fromAddress}\0${input.subject}\0${input.receivedAt.toISOString()}\0${plain.slice(0, 2000)}`)
     .digest('hex');
@@ -85,6 +95,8 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
     trackingUrl: tracking?.trackingUrl ?? findTrackingUrl(input.html ?? input.text),
     expectedDelivery: parseExpectedDelivery(plain, input.receivedAt),
     orderedAt: input.receivedAt,
+    itemCount: items.length > 0 ? items.reduce((total, item) => total + item.quantity, 0) : parseItemCount(plain),
+    items,
   };
 }
 
@@ -160,6 +172,105 @@ function parseExpectedDelivery(text: string, receivedAt: Date): Date | null {
   return parsed;
 }
 
+function parseItems(text: string): ParsedOrderItem[] {
+  const lines = text.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const items: ParsedOrderItem[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const labelled = line.match(/^(?:item|product|description|title)(?:\s+\d+)?\s*[:#-]\s*(.+)$/i);
+    // Retailer HTML tables often split a product, quantity, and price across
+    // three separate cells/lines. Keep the look-ahead small and only use it
+    // for the current product row; value-only lines are filtered below.
+    const nextLines: string[] = [];
+    for (const candidate of lines.slice(index + 1, index + 4)) {
+      if (/^(?:item|product|description|title)(?:\s+\d+)?\s*[:#-]/i.test(candidate)) break;
+      nextLines.push(candidate);
+    }
+    const adjacentDetails = nextLines.join(' | ');
+    const parsed = parseItemLine(labelled?.[1] ?? line, Boolean(labelled), adjacentDetails);
+    if (parsed) {
+      items.push(parsed);
+      continue;
+    }
+    if (labelled || isMetadataLine(line) || isNarrativeLine(line) || isValueOnlyLine(line)) continue;
+
+    // Common retailer layout: product name on one line, followed by Qty and
+    // price on the next one or two lines.
+    if (adjacentDetails && /(?:qty|quantity|\$)/i.test(adjacentDetails)) {
+      const following = parseItemLine(`${line} | ${adjacentDetails}`, false, '');
+      if (following) items.push(following);
+    }
+  }
+
+  const deduplicated = new Map<string, ParsedOrderItem>();
+  for (const item of items) {
+    const key = `${item.name.toLowerCase()}\0${item.quantity}\0${item.unitPriceCents ?? ''}\0${item.totalCents ?? ''}`;
+    if (!deduplicated.has(key)) deduplicated.set(key, item);
+  }
+  return [...deduplicated.values()].slice(0, 50);
+}
+
+function parseItemLine(value: string, labelled: boolean, adjacentDetails: string): ParsedOrderItem | null {
+  const line = value.replace(/^[-*•]\s*/, '').trim();
+  if (!line || (!labelled && (isMetadataLine(line) || isNarrativeLine(line)))) return null;
+
+  const detailText = `${line}${adjacentDetails ? ` | ${adjacentDetails}` : ''}`;
+  const quantityMatch = detailText.match(/(?:^|[|\s])(?:qty|quantity)\s*(?::|#|=|-|\|)?\s*(\d{1,3})\b/i)
+    ?? detailText.match(/^(\d{1,3})\s*[x×]\s+/i);
+  const quantity = quantityMatch ? Math.max(1, Number.parseInt(quantityMatch[1], 10)) : 1;
+  const lineMoneyMatches = [...line.matchAll(/\$\s*([\d,]+\.\d{2})/g)];
+  const moneyMatches = lineMoneyMatches.length > 0
+    ? lineMoneyMatches
+    : [...detailText.matchAll(/\$\s*([\d,]+\.\d{2})/g)];
+  if (!labelled && !quantityMatch && moneyMatches.length === 0 && !line.includes('|')) return null;
+
+  const parts = line.split('|').map((part) => part.trim()).filter(Boolean);
+  let name = parts.find((part) => !/(?:qty|quantity|sku|price|total)\s*[:#=-]?/i.test(part) && !/^\$?[\d,]+(?:\.\d{2})?$/.test(part)) ?? line;
+  name = name
+    .replace(/^(?:\d{1,3})\s*[x×]\s*/i, '')
+    .replace(/(?:qty|quantity)\s*[:#=-]?\s*\d{1,3}\b/gi, '')
+    .replace(/\$\s*[\d,]+\.\d{2}/g, '')
+    .replace(/\s*[-—–:]\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (name.length < 2 || name.length > 240 || isMetadataLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)) return null;
+
+  const price = moneyMatches.at(-1)?.[1];
+  const priceCents = price ? parseMoneyCents(price) : null;
+  const hasTotalLabel = /(?:line|item|product)\s+total\s*[:#=-]?|total\s*[:#=-]?/i.test(lineMoneyMatches.length > 0 ? line : detailText);
+  return {
+    name,
+    quantity,
+    unitPriceCents: priceCents !== null && !hasTotalLabel ? priceCents : null,
+    totalCents: priceCents !== null && hasTotalLabel ? priceCents : null,
+  };
+}
+
+function parseItemCount(text: string): number | null {
+  const match = text.match(/^(?:items?|products?)\s*(?:ordered)?\s*[:#=-]\s*(\d{1,3})\b/im)
+    ?? text.match(/^(?:total\s+)?(?:qty|quantity)\s*[:#=-]\s*(\d{1,3})\b/im);
+  if (!match) return null;
+  const count = Number.parseInt(match[1], 10);
+  return Number.isInteger(count) && count > 0 ? count : null;
+}
+
+function parseMoneyCents(value: string): number | null {
+  const amount = Number.parseFloat(value.replace(/,/g, ''));
+  return Number.isFinite(amount) ? Math.round(amount * 100) : null;
+}
+
+function isMetadataLine(value: string): boolean {
+  return /^(?:order|confirmation|subtotal|shipping|delivery|tax|grand\s+total|total|payment|billing|shipping\s+address|billing\s+address|tracking|status|date|email|phone|credit\s+card|qty|quantity|items?|products?)\b/i.test(value);
+}
+
+function isValueOnlyLine(value: string): boolean {
+  return /^[$€£]?\s*[\d,]+(?:\.\d{2})?$/.test(value.trim());
+}
+
+function isNarrativeLine(value: string): boolean {
+  return /^(?:your|we|thanks?|thank\s+you|hi|hello)\b[\s\S]*\b(?:order|purchase|shipment|delivery)\b[\s\S]*\b(?:confirmed|received|placed|ready|shipped|delivered|cancelled|canceled)\b/i.test(value.trim());
+}
+
 function findTrackingUrl(value: string): string | null {
   const urls = value.match(/https?:\/\/[^\s"'<>]+/gi) ?? [];
   return urls.find((url) => /ups\.com|fedex\.com|usps\.com|dhl\.com|track(?:ing)?/i.test(url))?.replace(/&amp;/g, '&') ?? null;
@@ -200,6 +311,7 @@ function stripHtml(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<\/?(?:br|p|div|li|tr|td|th|h[1-6])[^>]*>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
