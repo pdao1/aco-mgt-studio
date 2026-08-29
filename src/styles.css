@@ -526,8 +526,20 @@ tr:focus-visible {
   justify-content: space-between;
   gap: 20px;
   min-width: 0;
+  min-height: 86px;
   padding: 0 22px 0 26px;
   border-bottom: 1px solid var(--line);
+}
+
+.customers-workspace { grid-template-rows: auto 190px minmax(0, 1fr); }
+
+.workspace-title-block {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 6px;
 }
 
 .workspace-header h1 {
@@ -549,7 +561,30 @@ tr:focus-visible {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 0 0 auto;
 }
+
+.sync-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: min(100%, 680px);
+  min-width: 0;
+  padding: 6px 9px;
+  color: #7f2d31;
+  background: #fff5f5;
+  border: 1px solid #f2c7cb;
+  border-radius: var(--radius);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.sync-alert > svg { flex: 0 0 15px; margin-top: 1px; color: #e33745; }
+.sync-alert.warning { color: #7b5608; background: #fffaf0; border-color: #f2dcaa; }
+.sync-alert.warning > svg { color: #d88908; }
+.sync-alert-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sync-alert-copy strong { color: currentColor; font-size: 11px; font-weight: 700; }
+.sync-alert-copy span { overflow-wrap: anywhere; }
 
 .last-sync {
   display: flex;
@@ -2300,6 +2335,7 @@ tr:focus-visible {
   .add-customer-button svg { width: 18px; height: 18px; }
 
   .workspace { min-height: 650px; }
+  .customers-workspace { grid-template-rows: auto 190px minmax(0, 1fr); }
   .overview-workspace,
   .billing-workspace { min-height: 700px; }
   .overview-view,
@@ -2338,6 +2374,7 @@ tr:focus-visible {
   .rail-footer { display: none; }
 
   .workspace { grid-template-rows: 86px 126px minmax(0, 1fr); }
+  .customers-workspace { grid-template-rows: auto 126px minmax(0, 1fr); }
   .overview-workspace,
   .billing-workspace { min-height: 760px; }
   .overview-view,
@@ -2358,7 +2395,7 @@ tr:focus-visible {
   .billing-order-row { padding: 8px 14px; }
   .invoice-table th,
   .invoice-table td { padding: 0 14px; }
-  .workspace-header { padding: 0 14px 0 18px; }
+  .workspace-header { align-items: flex-start; padding: 16px 14px 16px 18px; }
   .workspace-header h1 { font-size: 19px; }
   .mobile-email { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
   .last-sync,

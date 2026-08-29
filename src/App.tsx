@@ -1,4 +1,4 @@
-import { ExternalLink, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ExternalLink, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { BillingView } from './components/BillingView';
 import { AccessGate } from './components/AccessGate';
@@ -94,8 +94,9 @@ export default function App() {
 
   const selectCustomer = (id: string) => {
     setSelectedCustomerId(id);
-    const firstOrder = data?.orders.find((order) => order.customerId === id) ?? null;
-    setSelectedOrderId(firstOrder?.id ?? null);
+    // Selecting a customer should open their workspace, not an arbitrary
+    // receipt. Orders remain available from the table and overview activity.
+    setSelectedOrderId(null);
     setFilter('all');
     setQuery('');
     setRetailer('');
@@ -265,9 +266,20 @@ export default function App() {
         {nav === 'customers' && (selectedCustomer ? (
           <>
             <header className="workspace-header">
-              <div>
+              <div className="workspace-title-block">
                 <h1>{selectedCustomer.name}</h1>
                 <span className="mobile-email">{selectedCustomer.emailMasked}</span>
+                {(selectedCustomer.syncStatus === 'error' || selectedCustomer.syncStatus === 'warning') && (
+                  <div className={`sync-alert ${selectedCustomer.syncStatus}`} role="alert">
+                    <AlertTriangle size={15} aria-hidden="true" />
+                    <span className="sync-alert-copy">
+                      <strong>{selectedCustomer.syncStatus === 'error' ? 'Sync error' : 'Sync warning'}</strong>
+                      <span>{selectedCustomer.syncMessage ?? (selectedCustomer.syncStatus === 'error'
+                        ? 'The inbox sync failed. Check the Gmail connection and try again.'
+                        : 'Some inbox messages could not be processed. Review the mailbox and sync again.')}</span>
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="sync-control">
                 <span className="last-sync">

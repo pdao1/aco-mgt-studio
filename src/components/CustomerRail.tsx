@@ -50,9 +50,10 @@ export function CustomerRail({ customers, selectedId, onSelect, onAdd }: Custome
             key={customer.id}
             className={selectedId === customer.id ? 'customer-row selected' : 'customer-row'}
             onClick={() => onSelect(customer.id)}
+            aria-label={`${customer.name}. ${syncLabels[customer.syncStatus]}${customer.syncMessage ? `. ${customer.syncMessage}` : ''}`}
           >
             <strong>{customer.name}</strong>
-            <span className="sync-line">
+            <span className="sync-line" title={customer.syncMessage ?? undefined}>
               <span className={`sync-dot ${customer.syncStatus}`} />
               <span>{syncLabels[customer.syncStatus]}</span>
               <time>{relativeTime(customer.lastSyncedAt)}</time>
