@@ -40,6 +40,17 @@ export interface EmailParseContext {
   knownOrderNumbers?: readonly string[];
 }
 
+/**
+ * Cheap mailbox gates used before MIME parsing. Keep these conservative: a
+ * message that looks like an order is still allowed through to the parser.
+ */
+export const MAX_EMAIL_SOURCE_BYTES = 12 * 1024 * 1024;
+export const MAX_NON_ORDER_SOURCE_BYTES = 750 * 1024;
+export const MAX_NON_ORDER_TEXT_CHARS = 120_000;
+
+const oneTimePinPattern = /\b(?:one[-\s]?time|otp|verification|security|login|sign[-\s]?in|authentication|access)\s+(?:code|pin|passcode|token)\b|\b(?:pin|passcode|verification\s+code)\s*[:#-]?\s*\d{4,8}\b/i;
+const orderSubjectPattern = /\b(?:order|purchase|receipt|confirmation|shipment|package|tracking|delivery|cancel(?:led|ed|lation)|refund)\b/i;
+
 const orderPatterns = [
   /(?:order|purchase)\s*(?:number|no\.?|#|id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
   /(?:order|purchase)\s+confirmation\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i,
@@ -71,6 +82,7 @@ const merchantAliases: Array<[RegExp, string]> = [
 ];
 
 export function parseOrderEmail(input: EmailInput, context: EmailParseContext = {}): ParsedOrderEmail | null {
+  if (isOneTimePinEmail(input)) return null;
   const plain = normalizeText(`${input.subject}\n${input.text}\n${stripHtml(input.html ?? '')}`);
   if (!looksOrderRelated(plain)) return null;
 
@@ -103,6 +115,43 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
     itemCount: items.length > 0 ? items.reduce((total, item) => total + item.quantity, 0) : parseItemCount(plain),
     items,
   };
+}
+
+/** Do not spend parser/AI work on login verification and one-time PIN mail. */
+export function isOneTimePinEmail(input: Pick<EmailInput, 'subject' | 'text' | 'html'>): boolean {
+  return oneTimePinPattern.test(`${input.subject}\n${input.text}\n${stripHtml(input.html ?? '')}`);
+}
+
+export function isCancellationNotice(input: Pick<EmailInput, 'subject' | 'text' | 'html'>): boolean {
+  const body = `${input.text}\n${stripHtml(input.html ?? '')}`;
+  return /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(input.subject)
+    || /\b(?:order|purchase|shipment|item)\b[^\r\n]{0,120}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(body)
+    || /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[^\r\n]{0,120}\b(?:order|purchase|shipment|item)\b/i.test(body);
+}
+
+/** Subject-only gate used before fetching an expensive MIME source. */
+export function hasLikelyOrderSubject(subject: string): boolean {
+  return orderSubjectPattern.test(subject);
+}
+
+/** Body-aware order signal used before optional AI review. */
+export function isLikelyOrderMessage(input: Pick<EmailInput, 'subject' | 'text' | 'html'>): boolean {
+  const plain = normalizeText(`${input.subject}\n${input.text}\n${stripHtml(input.html ?? '')}`);
+  return looksOrderRelated(plain);
+}
+
+/**
+ * Oversized marketing/newsletter messages are not useful order candidates.
+ * Keep likely order subjects eligible because some retailer receipts include
+ * unusually large inline HTML templates.
+ */
+export function shouldSkipOversizedMessage(subject: string, sourceBytes: number): boolean {
+  return sourceBytes > MAX_NON_ORDER_SOURCE_BYTES && !hasLikelyOrderSubject(subject);
+}
+
+export function shouldSkipOversizedText(input: Pick<EmailInput, 'subject' | 'text' | 'html'>): boolean {
+  const textLength = input.text.length + (input.html?.length ?? 0);
+  return textLength > MAX_NON_ORDER_TEXT_CHARS && !isLikelyOrderMessage(input);
 }
 
 function looksOrderRelated(text: string): boolean {

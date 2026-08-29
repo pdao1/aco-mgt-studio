@@ -169,4 +169,101 @@ describe('order enrichment boundary', () => {
     expect(result).toEqual({ items: [{ name: 'Air Max 90', quantity: 1, unitPriceCents: 12000, totalCents: null }] });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('iteratively repairs an order response after a schema validation miss', async () => {
+    const email = {
+      messageId: '<repair@example>',
+      fromAddress: 'orders@retailer.example',
+      fromName: 'Retailer Orders',
+      subject: 'Your order update',
+      text: 'Order number: R-847201\nYour order is confirmed.',
+      html: null,
+      receivedAt: new Date('2026-08-20T12:00:00Z'),
+    };
+    const stored: ParsedOrderEmail[] = [];
+    const repairInputs: Array<{ repairAttempt?: number; repairFeedback?: string }> = [];
+    const repository = {
+      recordMessage: async (_workspaceId: string, _customerId: string, _meta: unknown, order: ParsedOrderEmail | null) => {
+        if (order) stored.push(order);
+        return Boolean(order);
+      },
+    } as unknown as Repository;
+    let calls = 0;
+    const result = await runOrderIngestion('workspace', 'customer', email, {
+      messageKey: 'repair-message',
+      fromAddress: email.fromAddress,
+      subject: email.subject,
+      receivedAt: email.receivedAt,
+    }, {
+      repository,
+      parse: () => null,
+      itemReviewBudget: { remaining: 2 },
+      enricher: {
+        name: 'test-repairer',
+        enrich: async (input) => {
+          repairInputs.push(input);
+          calls += 1;
+          if (calls === 1) return { malformed: true };
+          return {
+            merchant: 'Retailer',
+            orderNumber: 'R-847201',
+            status: 'confirmed',
+            totalCents: null,
+            currency: 'USD',
+            trackingNumber: null,
+            carrier: null,
+            trackingUrl: null,
+            expectedDelivery: null,
+            orderedAt: email.receivedAt.toISOString(),
+            itemCount: null,
+            items: [],
+          };
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ matched: true, source: 'ai', validation: 'accepted' });
+    expect(calls).toBe(2);
+    expect(repairInputs[0]?.repairAttempt).toBe(1);
+    expect(repairInputs[1]?.repairAttempt).toBe(2);
+    expect(repairInputs[1]?.repairFeedback).toContain('failed validation');
+    expect(stored[0]?.orderNumber).toBe('R-847201');
+  });
+
+  it('does not call AI for one-time PIN messages', async () => {
+    let aiCalls = 0;
+    let recordedNull = false;
+    const email = {
+      messageId: '<pin-workflow@example>',
+      fromAddress: 'security@example.com',
+      fromName: 'Security',
+      subject: 'Your one-time verification code',
+      text: 'Use 482913 to sign in.',
+      html: null,
+      receivedAt: new Date('2026-08-20T12:00:00Z'),
+    };
+    const repository = {
+      recordMessage: async (_workspaceId: string, _customerId: string, _meta: unknown, order: ParsedOrderEmail | null) => {
+        recordedNull = order === null;
+        return false;
+      },
+    } as unknown as Repository;
+    const result = await runOrderIngestion('workspace', 'customer', email, {
+      messageKey: 'pin-workflow-message',
+      fromAddress: email.fromAddress,
+      subject: email.subject,
+      receivedAt: email.receivedAt,
+    }, {
+      repository,
+      parse: () => null,
+      enricher: {
+        name: 'test-repairer',
+        enrich: async () => { aiCalls += 1; return null; },
+      },
+    });
+
+    expect(result).toMatchObject({ matched: false, source: 'ai', validation: 'skipped' });
+    expect(aiCalls).toBe(0);
+    expect(recordedNull).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOrderEmail } from '../server/email/parser.js';
+import { isOneTimePinEmail, parseOrderEmail, shouldSkipOversizedMessage, shouldSkipOversizedText } from '../server/email/parser.js';
 
 const receivedAt = new Date('2026-08-20T12:00:00.000Z');
 
@@ -364,5 +364,25 @@ describe('parseOrderEmail', () => {
       html: null,
       receivedAt,
     })).toBeNull();
+  });
+
+  it('ignores one-time PIN messages before order parsing', () => {
+    const email = {
+      messageId: '<pin@example>',
+      fromAddress: 'security@example.com',
+      fromName: 'Example Security',
+      subject: 'Your one-time verification code',
+      text: 'Use 482913 to sign in. This code expires in 10 minutes.',
+      html: null,
+      receivedAt,
+    };
+    expect(isOneTimePinEmail(email)).toBe(true);
+    expect(parseOrderEmail(email)).toBeNull();
+  });
+
+  it('skips oversized messages only when their subject is not order-like', () => {
+    expect(shouldSkipOversizedMessage('This week in sneakers', 751 * 1024)).toBe(true);
+    expect(shouldSkipOversizedMessage('Your order confirmation', 751 * 1024)).toBe(false);
+    expect(shouldSkipOversizedText({ subject: 'Newsletter', text: 'news '.repeat(30_000), html: null })).toBe(true);
   });
 });

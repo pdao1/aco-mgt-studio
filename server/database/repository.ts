@@ -944,6 +944,19 @@ export class Repository {
     });
   }
 
+  async listProcessedMessageKeys(workspaceId: string, customerId: string): Promise<string[]> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{ message_key: string }>(`
+        SELECT message_key
+        FROM processed_messages
+        WHERE workspace_id = $1 AND customer_id = $2
+        ORDER BY received_at DESC
+        LIMIT 50000
+      `, [workspaceId, customerId]);
+      return result.rows.map((row) => row.message_key);
+    });
+  }
+
   async beginSync(workspaceId: string, customerId: string): Promise<string> {
     return this.withWorkspace(workspaceId, async (client) => {
       const runId = randomUUID();

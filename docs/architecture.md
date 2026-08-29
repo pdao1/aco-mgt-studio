@@ -21,7 +21,7 @@ Stripe/Venmo payment links when configured.
 | Notifications | Optional SMTP delivery is queued outside request handlers for invoice-created (buyer) and invoice-paid (buyer + seller) notices. |
 | Order detail | Parsed line items are stored as bounded JSON on the customer-scoped order and rendered in both the operator inspector and customer portal detail view. |
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
-| Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
+| Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, fetches headers first, skips processed Message-IDs, ignores one-time PINs and oversized non-order mail, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
 | Carrier tracking | `TrackingSyncCoordinator` polls active shipment rows on a bounded interval. USPS, UPS, and FedEx adapters use server-side OAuth credentials, cache tokens, map carrier vocabulary to the canonical order status, and fail soft per shipment. Delivered/cancelled shipments are not polled again. |
 | AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
@@ -69,17 +69,18 @@ The current IMAP consumer calls these stages through
 
 | Task | Input reference | Output/status | Side effect | Retry/idempotency |
 | --- | --- | --- | --- | --- |
-| Extract | workspace, customer, sync run, bounded Gmail search window | message source held in memory; scanned count | read-only IMAP fetch | reconnect with bounded timeout; message key is provider Message-ID or content hash |
+| Extract | workspace, customer, sync run, bounded Gmail search window | header candidates; scanned count | read-only IMAP header fetch, then source fetch only for unprocessed candidates | reconnect with bounded timeout; Message-ID or stable mailbox-UID fallback key skips prior messages |
+| Cheap filter | header/source candidate | skipped PIN, oversized non-order, or empty candidate | processed-message metadata only | deterministic and bounded; skipped messages are not downloaded again |
 | Normalize | one fetched source | bounded `EmailInput` with subject/from/date/text/html | none | deterministic per message key; source is never logged or stored |
 | Deterministic parse | normalized email | `ParsedOrderEmail` or no match | none | pure function; reruns produce the same normalized values |
-| Optional AI item review | redacted retailer domain, subject, known order number, and 6,000-character line-preserving excerpt | item-only structured output validated into bounded `ParsedOrderItem[]` or ignored | provider call is bounded to `OPENAI_MAX_REVIEWS_PER_SYNC` (default 25) | timeout/provider/schema failure keeps the deterministic order; no blind retry |
+| Optional AI repair | redacted retailer domain, subject, and 6,000-character excerpt | order or item structured output validated into normalized facts or ignored | provider call is bounded to `OPENAI_MAX_REVIEWS_PER_SYNC` (default 25); at most two attempts per message | second attempt receives validation feedback; timeout/provider failure keeps the deterministic result; order number must be grounded in the excerpt |
 | Load | workspace, customer, message metadata, validated order | processed-message result and normalized order/event/shipment rows | PostgreSQL transaction/upserts | unique `(workspace, customer, message_key)` and order keys prevent duplicates |
 | Reconcile | sync run and database counts | completed/failed run and repair candidates | customer sync state update | repeatable query; failed records remain visible for operator repair |
 
 ### Throughput and failure assumptions
 
 - One active sync per customer; the default poll interval is five minutes.
-- A sync searches at most 500 messages and skips sources larger than 12 MiB.
+- A sync searches at most 500 messages, skips sources larger than 12 MiB, and drops non-order sources over 750 KiB or parsed non-order text over 120,000 characters.
 - An invoice contains at most 200 orders and one currency.
 - IMAP timeouts are 15 seconds for connect/greeting and 90 seconds for a
   socket. Authentication, timeout, rate-limit, and unknown failures become a
@@ -163,16 +164,18 @@ product-label or quantity evidence for unlabelled rows and rejects common
 recommendation/category/CSS/link/UI fragments; this prevents a retailer's email
 chrome from becoming purchased items. If an order has no clean item rows, a
 suspicious name, or link/UI chrome in the source and `OPENAI_KEY` is present,
-the server sends a redacted,
-line-preserving excerpt to the GPT-5 nano Responses API with Structured Outputs
-(`order-items.v1`). The prompt requires purchasable rows only and permits an
-empty result when uncertain. `store:false`, a 10-second timeout, and a default
-25-review-per-sync budget keep the quality pass bounded. The result can update
-only `items`/`itemCount`; order identity, status, totals, tracking, and billing
-remain deterministic. Provider errors and malformed output are logged as a
-safe reason and leave the deterministic record intact. No model call is made
-when the key is absent, for cancellation notices, or after the per-sync budget
-is exhausted. Raw mailbox credentials, headers, and HTML are never sent.
+the server sends a redacted, line-preserving excerpt to the GPT-5 nano Responses
+API with Structured Outputs (`order-items-repair.v2`). If deterministic parsing
+cannot normalize an order-like message, the same bounded provider can attempt a
+full order repair (`order-repair.v1`), but it may persist an order only when the
+returned order number is copied from the excerpt. Each message has at most two
+attempts, the second receives explicit validation feedback, and the default
+25-review-per-sync budget covers both item and order calls. `store:false`, a
+10-second timeout, and strict local validation keep the pass bounded. Provider
+errors and malformed output leave deterministic records intact. No model call
+is made when the key is absent, for cancellation notices, one-time PINs, or
+after the per-sync budget is exhausted. Raw mailbox credentials, headers, and
+HTML are never sent.
 
 The default model is configurable with `OPENAI_MODEL` and is set to
 `gpt-5-nano`; the key and model are server-side environment variables only.

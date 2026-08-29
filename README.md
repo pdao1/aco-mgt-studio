@@ -8,7 +8,8 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - A compact operator surface: Overview, Customers, Billing, and per-ACO Settings. Orders and shipments stay inside a customer view instead of becoming separate navigation tabs.
 - Gmail app-password verification before a mailbox is saved.
 - AES-256-GCM encryption for app passwords at rest. The API never returns them and logs never include them.
-- Read-only Gmail IMAP polling of All Mail (with Inbox fallback), message de-duplication, and a bounded Gmail search for order-like mail.
+- Read-only Gmail IMAP polling of All Mail (with Inbox fallback), header-first message de-duplication, and a bounded Gmail search for order-like mail. Previously processed Message-IDs are not downloaded again on each refresh.
+- Cheap mailbox gates ignore one-time PIN/verification-code mail and oversized non-order messages before MIME parsing; skipped messages are recorded as processed so the same noise is not revisited.
 - Generic parsing for order number, merchant, total, pending/confirmed/processing/shipped/delivered/cancelled status, UPS/USPS/FedEx/Amazon tracking, tracking URLs, and estimated delivery dates. Generic acknowledgements stay pending until a matching explicit confirmation email is seen.
 - PostgreSQL workspace isolation with forced row-level security on customer, mailbox, order, shipment, event, processed-message, sync-run, invoice, invoice-line, and Stripe-event tables.
 - An operator-password login backed by a signed, `HttpOnly`, `SameSite=Strict` session cookie.
@@ -22,7 +23,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - A beta serial gate protects the operator surface. The serial is server-side (`SERVICE_SERIAL`) and unlocks a signed, HttpOnly access cookie; it is never shipped to the browser.
 - `/` is the public marketing site, `/app/dashboard` is the operator app, and `/app/admin/super` is reserved for the service owner.
 - Each workspace can set its customer-facing name, HTTPS logo, accent color, seller notification email, and Venmo payment URL. SMTP invoice notifications are optional and disabled until configured.
-- A versioned `orders.ingestion.v1` workflow seam separates extract, normalize, deterministic parse, optional AI item review, and load stages. With `OPENAI_KEY`, a bounded GPT-5 nano pass reviews only empty or suspicious item rows; without it, sync stays deterministic and network-free beyond Gmail.
+- A versioned `orders.ingestion.v1` workflow seam separates extract, normalize, deterministic parse, optional AI item review/order repair, and load stages. With `OPENAI_KEY`, a bounded GPT-5 nano pass reviews suspicious item rows or repairs an order-like message that deterministic parsing could not normalize. Each message gets at most two structured attempts, and the second attempt receives explicit validation feedback; without it, sync stays deterministic and network-free beyond Gmail.
 - Optional server-side USPS, UPS, and FedEx tracking polling updates shipment status and expected delivery without exposing carrier credentials to the browser. Each provider requires its own developer account/keys; the adapters do not call a carrier when credentials are absent.
 - A Docker/PostgreSQL runtime and a Render Blueprint.
 
@@ -167,11 +168,16 @@ The implementation contract and future workflow/AI task boundaries are in
 
 The parser is intentionally deterministic and provider-neutral. It covers common
 order and carrier formats, requires explicit evidence before accepting an item
-row, and rejects common recommendation/category/CSS/link/UI fragments. When configured,
-the server can ask the low-cost GPT-5 nano reviewer to clean up only empty or
-suspicious item lists; the model cannot change order identity, status, totals,
-tracking, or billing. Set `OPENAI_KEY` and optionally `OPENAI_MODEL` and
-`OPENAI_MAX_REVIEWS_PER_SYNC` in the server environment. Add sanitized `.eml`
-fixtures and parser rules as new retailer formats are encountered. The service
-stores only normalized facts and limited message metadata, so adding a new rule
-does not require retaining historical email bodies.
+row, and rejects common recommendation/category/CSS/link/UI fragments. When
+configured, the server can ask the low-cost GPT-5 nano reviewer to clean up
+suspicious item lists or repair an order-like message that deterministic parsing
+could not normalize. The model receives only a redacted, bounded text excerpt
+and strict JSON schema; order-repair responses must contain an order number
+copied from the email, and deterministic identity/status remain authoritative
+whenever available. Each message has at most two repair attempts and the
+per-sync `OPENAI_MAX_REVIEWS_PER_SYNC` budget applies to all attempts. Set
+`OPENAI_KEY` and optionally `OPENAI_MODEL` and `OPENAI_MAX_REVIEWS_PER_SYNC` in
+the server environment. Add sanitized `.eml` fixtures and parser rules as new
+retailer formats are encountered. The service stores only normalized facts and
+limited message metadata, so adding a new rule does not require retaining
+historical email bodies.

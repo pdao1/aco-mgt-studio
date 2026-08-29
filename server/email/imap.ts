@@ -3,12 +3,17 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import type { Repository } from '../database/repository.js';
 import { SecretBox } from '../security/secret-box.js';
-import { parseOrderEmail } from './parser.js';
+import {
+  isOneTimePinEmail,
+  MAX_EMAIL_SOURCE_BYTES,
+  parseOrderEmail,
+  shouldSkipOversizedMessage,
+  shouldSkipOversizedText,
+} from './parser.js';
 import { runOrderIngestion } from '../workflows/order-ingestion.js';
 import type { OrderEnrichmentProvider } from '../workflows/order-enrichment.js';
 
 const GMAIL_HOST = 'imap.gmail.com';
-const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
 
 function createClient(user: string, password: string) {
   return new ImapFlow({
@@ -85,6 +90,7 @@ export class MailboxSyncCoordinator {
     let matched = 0;
     const itemReviewBudget = { remaining: this.maxAiReviewsPerSync };
     const knownOrderNumbers = new Set(await this.repository.listOrderNumbers(this.workspaceId, customerId));
+    const processedMessageKeys = new Set(await this.repository.listProcessedMessageKeys(this.workspaceId, customerId));
     const client = createClient(mailbox.gmailAddress, this.secretBox.decrypt(mailbox.secretCiphertext));
 
     try {
@@ -125,48 +131,110 @@ export class MailboxSyncCoordinator {
           .sort((left, right) => left - right)
           .slice(-this.maxMessages);
         if (uids.length > 0) {
-          for await (const message of client.fetch(uids, { envelope: true, internalDate: true, source: true }, { uid: true })) {
-            scanned += 1;
-            if (!message.source || message.source.length > MAX_SOURCE_BYTES) continue;
-            const parsedMail = await simpleParser(message.source, {
-              skipImageLinks: true,
-              skipTextToHtml: true,
-              maxHtmlLengthToParse: 2_000_000,
-            });
-            const from = parsedMail.from?.value[0];
-            const fromAddress = ('address' in (from ?? {}) ? from?.address : null) || message.envelope?.from?.[0]?.address || 'unknown@unknown.invalid';
-            const fromName = ('name' in (from ?? {}) ? from?.name : null) || message.envelope?.from?.[0]?.name || null;
-            const subject = parsedMail.subject || message.envelope?.subject || '(no subject)';
-            const receivedValue = parsedMail.date || message.internalDate || new Date();
+          // Fetch headers first. Message-ID is the durable de-duplication key,
+          // so previously processed messages do not need their full MIME
+          // source downloaded and parsed on every refresh.
+          const candidateUids: number[] = [];
+          for await (const message of client.fetch(uids, { envelope: true, internalDate: true }, { uid: true })) {
+            const messageKey = message.envelope?.messageId?.trim() || null;
+            if (messageKey && processedMessageKeys.has(messageKey)) continue;
+            const subject = message.envelope?.subject || '(no subject)';
+            const fromAddress = message.envelope?.from?.[0]?.address || 'unknown@unknown.invalid';
+            const receivedValue = message.internalDate || new Date();
             const parsedReceivedAt = receivedValue instanceof Date ? receivedValue : new Date(receivedValue);
             const receivedAt = Number.isNaN(parsedReceivedAt.getTime()) ? new Date() : parsedReceivedAt;
-            const html = typeof parsedMail.html === 'string' ? parsedMail.html : null;
-            const email = {
-              messageId: parsedMail.messageId || message.envelope?.messageId || null,
+            const metadata = {
+              messageKey: messageKey || createHash('sha256')
+                .update(`${message.uid}\0${fromAddress}\0${subject}\0${receivedAt.toISOString()}`)
+                .digest('hex'),
               fromAddress,
-              fromName,
               subject,
-              text: parsedMail.text ?? '',
-              html,
               receivedAt,
             };
-            const messageKey = parsedMail.messageId || message.envelope?.messageId || createHash('sha256')
-              .update(message.source)
-              .digest('hex');
-            const parsedOrder = parseOrderEmail(email, { knownOrderNumbers: [...knownOrderNumbers] });
-            const result = await runOrderIngestion(this.workspaceId, customerId, email, {
-              messageKey,
-              fromAddress,
-              subject,
-              receivedAt,
-            }, {
-              repository: this.repository,
-              parse: () => parsedOrder,
-              enricher: this.enricher,
-              itemReviewBudget,
-            });
-            if (parsedOrder?.orderNumber) knownOrderNumbers.add(parsedOrder.orderNumber);
-            if (result.matched) matched += 1;
+            if (isOneTimePinEmail({ subject, text: '', html: null })) {
+              await this.repository.recordMessage(this.workspaceId, customerId, metadata, null);
+              processedMessageKeys.add(metadata.messageKey);
+              continue;
+            }
+            candidateUids.push(message.uid);
+          }
+
+          if (candidateUids.length > 0) {
+            for await (const message of client.fetch(candidateUids, { envelope: true, internalDate: true, source: true }, { uid: true })) {
+              scanned += 1;
+              const envelopeMessageKey = message.envelope?.messageId?.trim() || null;
+              if (envelopeMessageKey && processedMessageKeys.has(envelopeMessageKey)) continue;
+              const subject = message.envelope?.subject || '(no subject)';
+              const fromAddress = message.envelope?.from?.[0]?.address || 'unknown@unknown.invalid';
+              const fromName = message.envelope?.from?.[0]?.name || null;
+              const receivedValue = message.internalDate || new Date();
+              const parsedInternalDate = receivedValue instanceof Date ? receivedValue : new Date(receivedValue);
+              const receivedAt = Number.isNaN(parsedInternalDate.getTime()) ? new Date() : parsedInternalDate;
+              const messageKey = envelopeMessageKey || createHash('sha256')
+                // Gmail UIDs are stable within the selected mailbox and give
+                // messages without a Message-ID the same key in both the
+                // header-only and source fetches.
+                .update(`${message.uid}\0${fromAddress}\0${subject}\0${receivedAt.toISOString()}`)
+                .digest('hex');
+              const metadata = { messageKey, fromAddress, subject, receivedAt };
+
+              if (!message.source || message.source.length > MAX_EMAIL_SOURCE_BYTES || shouldSkipOversizedMessage(subject, message.source.length)) {
+                await this.repository.recordMessage(this.workspaceId, customerId, metadata, null);
+                processedMessageKeys.add(messageKey);
+                continue;
+              }
+              const parsedMail = await simpleParser(message.source, {
+                skipImageLinks: true,
+                skipTextToHtml: true,
+                maxHtmlLengthToParse: 2_000_000,
+              });
+              const from = parsedMail.from?.value[0];
+              const parsedFromAddress = ('address' in (from ?? {}) ? from?.address : null) || fromAddress;
+              const parsedFromName = ('name' in (from ?? {}) ? from?.name : null) || fromName;
+              const parsedSubject = parsedMail.subject || subject;
+              const parsedReceivedValue = parsedMail.date || receivedAt;
+              const parsedReceivedDate = parsedReceivedValue instanceof Date ? parsedReceivedValue : new Date(parsedReceivedValue);
+              const parsedReceivedAt = Number.isNaN(parsedReceivedDate.getTime()) ? receivedAt : parsedReceivedDate;
+              const html = typeof parsedMail.html === 'string' ? parsedMail.html : null;
+              const email = {
+                messageId: parsedMail.messageId || message.envelope?.messageId || null,
+                fromAddress: parsedFromAddress,
+                fromName: parsedFromName,
+                subject: parsedSubject,
+                text: parsedMail.text ?? '',
+                html,
+                receivedAt: parsedReceivedAt,
+              };
+              const finalMessageKey = parsedMail.messageId || messageKey;
+              const finalMetadata = {
+                messageKey: finalMessageKey,
+                fromAddress: parsedFromAddress,
+                subject: parsedSubject,
+                receivedAt: parsedReceivedAt,
+              };
+              if (isOneTimePinEmail(email) || shouldSkipOversizedText(email)) {
+                await this.repository.recordMessage(this.workspaceId, customerId, finalMetadata, null);
+                processedMessageKeys.add(finalMessageKey);
+                processedMessageKeys.add(messageKey);
+                continue;
+              }
+              const parsedOrder = parseOrderEmail(email, { knownOrderNumbers: [...knownOrderNumbers] });
+              const result = await runOrderIngestion(this.workspaceId, customerId, email, {
+                messageKey: finalMessageKey,
+                fromAddress: parsedFromAddress,
+                subject: parsedSubject,
+                receivedAt: parsedReceivedAt,
+              }, {
+                repository: this.repository,
+                parse: () => parsedOrder,
+                enricher: this.enricher,
+                itemReviewBudget,
+              });
+              if (parsedOrder?.orderNumber) knownOrderNumbers.add(parsedOrder.orderNumber);
+              processedMessageKeys.add(finalMessageKey);
+              processedMessageKeys.add(messageKey);
+              if (result.matched) matched += 1;
+            }
           }
         }
       } finally {

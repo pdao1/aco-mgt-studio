@@ -6,6 +6,8 @@ export interface OrderEnrichmentInput {
   subject: string;
   receivedAt: Date;
   bodyExcerpt: string;
+  repairAttempt?: number;
+  repairFeedback?: string;
 }
 
 /**
@@ -21,6 +23,9 @@ export interface OrderItemReviewInput {
   orderNumber: string | null;
   receivedAt: Date;
   bodyExcerpt: string;
+  deterministicItems?: readonly ParsedOrderItem[];
+  repairAttempt?: number;
+  repairFeedback?: string;
 }
 
 export interface OrderEnrichmentProvider {
@@ -57,6 +62,11 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
   if (Number.isNaN(orderedAt.getTime())) return null;
   const orderNumber = typeof candidate.orderNumber === 'string' ? candidate.orderNumber.trim().toUpperCase() : null;
   const trackingNumber = typeof candidate.trackingNumber === 'string' ? candidate.trackingNumber.trim().toUpperCase() : null;
+  const expectedDelivery = candidate.expectedDelivery instanceof Date
+    ? candidate.expectedDelivery
+    : typeof candidate.expectedDelivery === 'string'
+      ? new Date(candidate.expectedDelivery)
+      : null;
   if (!orderNumber && !trackingNumber) return null;
   return {
     messageKey: fallback.messageKey,
@@ -70,7 +80,7 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
     trackingNumber,
     carrier: typeof candidate.carrier === 'string' ? candidate.carrier.trim().slice(0, 80) || null : null,
     trackingUrl: typeof candidate.trackingUrl === 'string' && /^https?:\/\//i.test(candidate.trackingUrl) ? candidate.trackingUrl.slice(0, 1000) : null,
-    expectedDelivery: candidate.expectedDelivery instanceof Date && !Number.isNaN(candidate.expectedDelivery.getTime()) ? candidate.expectedDelivery : null,
+    expectedDelivery: expectedDelivery && !Number.isNaN(expectedDelivery.getTime()) ? expectedDelivery : null,
     orderedAt,
     itemCount: items.length > 0 ? items.reduce((total, item) => total + item.quantity, 0) : candidate.itemCount ?? null,
     items,
@@ -117,6 +127,8 @@ export function buildRedactedEnrichmentInput(input: {
   subject: string;
   text: string;
   receivedAt: Date;
+  repairAttempt?: number;
+  repairFeedback?: string;
 }): OrderEnrichmentInput {
   const fromDomain = input.fromAddress.split('@')[1]?.toLowerCase() ?? null;
   const redactEmails = (value: string) => value.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi, '[redacted-email]');
@@ -128,6 +140,8 @@ export function buildRedactedEnrichmentInput(input: {
     subject,
     receivedAt: input.receivedAt,
     bodyExcerpt,
+    repairAttempt: input.repairAttempt,
+    repairFeedback: input.repairFeedback,
   };
 }
 
@@ -139,6 +153,9 @@ export function buildRedactedItemReviewInput(input: {
   receivedAt: Date;
   merchant: string;
   orderNumber: string | null;
+  deterministicItems?: readonly ParsedOrderItem[];
+  repairAttempt?: number;
+  repairFeedback?: string;
 }): OrderItemReviewInput {
   const fromDomain = input.fromAddress.split('@')[1]?.toLowerCase() ?? null;
   return {
@@ -147,6 +164,9 @@ export function buildRedactedItemReviewInput(input: {
     subject: redactMailboxText(input.subject).slice(0, 500),
     merchant: input.merchant.slice(0, 120),
     orderNumber: input.orderNumber,
+    deterministicItems: input.deterministicItems,
+    repairAttempt: input.repairAttempt,
+    repairFeedback: input.repairFeedback,
     receivedAt: input.receivedAt,
     // Keep line breaks: they are often the only signal separating a product
     // row from a retailer's navigation/recommendation copy.
