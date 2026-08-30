@@ -3,6 +3,7 @@ import pg, { type PoolClient } from 'pg';
 import type { ParsedOrderEmail, ParsedOrderItem, ParsedOrderStatus } from '../email/parser.js';
 import { SecretBox } from '../security/secret-box.js';
 import type { TrackingSnapshot } from '../tracking/providers.js';
+import type { WorkspaceTheme } from '../../src/lib/themes.js';
 
 const { Pool } = pg;
 
@@ -10,6 +11,7 @@ export type FeeBasis = 'checkout_total' | 'custom_amount';
 
 export interface WorkspaceRecord {
   id: string;
+  slug: string;
   name: string;
   nodeGroupKey: string;
   status: 'provisioning' | 'active' | 'suspended';
@@ -17,6 +19,7 @@ export interface WorkspaceRecord {
 }
 
 export interface WorkspaceSettingsRecord {
+  theme: WorkspaceTheme;
   displayName: string;
   logoUrl: string | null;
   accentColor: string;
@@ -78,6 +81,8 @@ export interface InvoiceLineRecord {
 
 export interface InvoiceRecord {
   id: string;
+  workspaceId: string;
+  companyName: string | null;
   customerId: string;
   invoiceNumber: string;
   billingModel: 'legacy_order_plus_fee' | 'service_fee_only';
@@ -145,9 +150,7 @@ export class Repository {
       `INSERT INTO workspaces(id, slug, name, node_group_key, status)
        VALUES ($1, $2, $3, $2, 'active')
        ON CONFLICT (slug) DO UPDATE SET
-         name = EXCLUDED.name,
          node_group_key = COALESCE(workspaces.node_group_key, EXCLUDED.node_group_key),
-         status = CASE WHEN workspaces.provisioning_provider IS NULL THEN 'active' ELSE workspaces.status END,
          updated_at = now()
        RETURNING id`,
       [id, slug, name],
@@ -162,31 +165,90 @@ export class Repository {
     return inserted.rows[0].id;
   }
 
+  async listActiveWorkspaceIds(): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>("SELECT id FROM workspaces WHERE status = 'active'");
+    return result.rows.map((row) => row.id);
+  }
+
+  async findWorkspaceIdBySlug(slug: string): Promise<string | null> {
+    const result = await this.pool.query<{ id: string }>('SELECT id FROM workspaces WHERE slug = $1', [slug]);
+    return result.rows[0]?.id ?? null;
+  }
+
+  async createWorkspace(slug: string, name: string, passwordHash: string): Promise<string> {
+    const id = randomUUID();
+    return this.withWorkspace(id, async (client) => {
+      // INSERT only: knowing an existing slug can never claim that workspace.
+      await client.query(`INSERT INTO workspaces(id, slug, name, node_group_key, status)
+        VALUES ($1, $2, $3, $2, 'active')`, [id, slug, name]);
+      await client.query('INSERT INTO workspace_settings(workspace_id, display_name) VALUES ($1, $2)', [id, name]);
+      await client.query('INSERT INTO workspace_credentials(workspace_id, password_hash) VALUES ($1, $2)', [id, passwordHash]);
+      return id;
+    });
+  }
+
+  async bootstrapPassword(workspaceId: string, passwordHash: string): Promise<void> {
+    await this.withWorkspace(workspaceId, async (client) => {
+      await client.query(`INSERT INTO workspace_credentials(workspace_id, password_hash) VALUES ($1, $2)
+        ON CONFLICT (workspace_id) DO NOTHING`, [workspaceId, passwordHash]);
+    });
+  }
+
+  async credentialsForSlug(slug: string) {
+    const result = await this.pool.query<{ id: string }>("SELECT id FROM workspaces WHERE slug = $1 AND status = 'active'", [slug]);
+    if (!result.rows[0]) return null;
+    const workspaceId = result.rows[0].id;
+    const credentials = await this.getCredentials(workspaceId);
+    return credentials ? { workspaceId, ...credentials } : null;
+  }
+
+  async getCredentials(workspaceId: string) {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{ password_hash: string; session_version: number }>(`
+        SELECT c.password_hash, c.session_version FROM workspace_credentials c
+        JOIN workspaces w ON w.id = c.workspace_id
+        WHERE c.workspace_id = $1 AND w.status = 'active'`, [workspaceId]);
+      return result.rows[0] ?? null;
+    });
+  }
+
+  async changePassword(workspaceId: string, previousHash: string, passwordHash: string): Promise<number | null> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{ session_version: number }>(`
+        UPDATE workspace_credentials SET password_hash = $3, session_version = session_version + 1, updated_at = now()
+        WHERE workspace_id = $1 AND password_hash = $2 RETURNING session_version`, [workspaceId, previousHash, passwordHash]);
+      return result.rows[0]?.session_version ?? null;
+    });
+  }
+
   async dashboard(workspaceId: string) {
     return this.withWorkspace(workspaceId, async (client) => {
       const workspaceResult = await client.query<{
         id: string;
+        slug: string;
         name: string;
         node_group_key: string;
         status: WorkspaceRecord['status'];
       }>(`
-        SELECT id, name, node_group_key, status
+        SELECT id, slug, name, node_group_key, status
         FROM workspaces
         WHERE id = $1
       `, [workspaceId]);
       const workspace = workspaceResult.rows[0];
       if (!workspace) throw new Error('Workspace not found.');
       const settingsResult = await client.query<{
+        theme: WorkspaceTheme;
         display_name: string;
         logo_url: string | null;
         accent_color: string;
         notification_seller_email: string | null;
         venmo_payment_url: string | null;
       }>(`
-        SELECT display_name, logo_url, accent_color, notification_seller_email, venmo_payment_url
+        SELECT theme, display_name, logo_url, accent_color, notification_seller_email, venmo_payment_url
         FROM workspace_settings WHERE workspace_id = $1
       `, [workspaceId]);
       const settings = settingsResult.rows[0] ?? {
+        theme: 'classic-light' as const,
         display_name: workspace.name,
         logo_url: null,
         accent_color: '#1463f3',
@@ -279,6 +341,7 @@ export class Repository {
       return {
         workspace: {
           id: workspace.id,
+          slug: workspace.slug,
           name: workspace.name,
           nodeGroupKey: workspace.node_group_key,
           status: workspace.status,
@@ -502,49 +565,28 @@ export class Repository {
 
   async getWorkspaceSettings(workspaceId: string): Promise<WorkspaceSettingsRecord> {
     return this.withWorkspace(workspaceId, async (client) => {
-      const result = await client.query<{
-        display_name: string;
-        logo_url: string | null;
-        accent_color: string;
-        notification_seller_email: string | null;
-        venmo_payment_url: string | null;
-      }>(`
-        SELECT display_name, logo_url, accent_color, notification_seller_email, venmo_payment_url
-        FROM workspace_settings WHERE workspace_id = $1
-      `, [workspaceId]);
-      const row = result.rows[0];
-      if (!row) {
-        await client.query(`INSERT INTO workspace_settings(workspace_id) VALUES ($1) ON CONFLICT DO NOTHING`, [workspaceId]);
-        return { displayName: 'ACO Studio', logoUrl: null, accentColor: '#1463f3', notificationSellerEmail: null, venmoPaymentUrl: null };
-      }
-      return toWorkspaceSettings(row);
+      await client.query(`INSERT INTO workspace_settings(workspace_id, display_name)
+        SELECT id, name FROM workspaces WHERE id = $1 ON CONFLICT DO NOTHING`, [workspaceId]);
+      const result = await client.query(`SELECT theme, display_name, logo_url, accent_color,
+        notification_seller_email, venmo_payment_url FROM workspace_settings WHERE workspace_id = $1`, [workspaceId]);
+      if (!result.rows[0]) throw new Error('Workspace not found.');
+      return toWorkspaceSettings(result.rows[0]);
     });
   }
 
-  async updateWorkspaceSettings(
-    workspaceId: string,
-    input: Partial<WorkspaceSettingsRecord>,
-  ): Promise<WorkspaceSettingsRecord> {
+  async updateWorkspaceSettings(workspaceId: string, input: Partial<WorkspaceSettingsRecord>): Promise<WorkspaceSettingsRecord> {
     return this.withWorkspace(workspaceId, async (client) => {
-      await client.query(`
-        INSERT INTO workspace_settings(workspace_id, display_name, logo_url, accent_color, notification_seller_email, venmo_payment_url)
-        VALUES ($1, COALESCE($2, 'ACO Studio'), $3, COALESCE($4, '#1463f3'), $5, $6)
-        ON CONFLICT (workspace_id) DO UPDATE SET
-          display_name = COALESCE($2, workspace_settings.display_name),
-          logo_url = $3,
-          accent_color = COALESCE($4, workspace_settings.accent_color),
-          notification_seller_email = $5,
-          venmo_payment_url = $6,
-          updated_at = now()
-      `, [workspaceId, input.displayName ?? null, input.logoUrl ?? null, input.accentColor ?? null, input.notificationSellerEmail ?? null, input.venmoPaymentUrl ?? null]);
-      const row = await client.query<{
-        display_name: string;
-        logo_url: string | null;
-        accent_color: string;
-        notification_seller_email: string | null;
-        venmo_payment_url: string | null;
-      }>(`SELECT display_name, logo_url, accent_color, notification_seller_email, venmo_payment_url FROM workspace_settings WHERE workspace_id = $1`, [workspaceId]);
-      return toWorkspaceSettings(row.rows[0]);
+      // Lock and merge so a theme-only PATCH never clears payment or notification settings.
+      const current = await client.query(`SELECT theme, display_name, logo_url, accent_color,
+        notification_seller_email, venmo_payment_url FROM workspace_settings WHERE workspace_id = $1 FOR UPDATE`, [workspaceId]);
+      if (!current.rows[0]) throw new Error('Workspace settings not found.');
+      const next = { ...toWorkspaceSettings(current.rows[0]), ...input };
+      await client.query(`UPDATE workspace_settings SET display_name = $2, theme = $3, logo_url = $4,
+        accent_color = $5, notification_seller_email = $6, venmo_payment_url = $7, updated_at = now()
+        WHERE workspace_id = $1`, [workspaceId, next.displayName, next.theme, next.logoUrl,
+        next.accentColor, next.notificationSellerEmail, next.venmoPaymentUrl]);
+      await client.query('UPDATE workspaces SET name = $2, updated_at = now() WHERE id = $1', [workspaceId, next.displayName]);
+      return next;
     });
   }
 
@@ -712,12 +754,13 @@ export class Repository {
   async updateInvoiceStripeState(
     workspaceId: string,
     invoiceId: string,
-    update: { status: InvoiceRecord['status']; stripeInvoiceId?: string; paymentUrl?: string | null; paidAt?: Date | null; lastError?: string | null },
+    update: { status: InvoiceRecord['status']; companyName?: string | null; stripeInvoiceId?: string; paymentUrl?: string | null; paidAt?: Date | null; lastError?: string | null },
   ): Promise<InvoiceRecord | null> {
     return this.withWorkspace(workspaceId, async (client) => {
       const result = await client.query<{ id: string }>(`
         UPDATE invoices
         SET status = $3,
+            company_name = CASE WHEN status = 'draft' AND $3 <> 'draft' THEN COALESCE($8, (SELECT display_name FROM workspace_settings WHERE workspace_id = $1)) ELSE company_name END,
             stripe_invoice_id = COALESCE($4, stripe_invoice_id),
             hosted_invoice_url = COALESCE($5, hosted_invoice_url),
             paid_at = COALESCE($6, paid_at),
@@ -725,7 +768,7 @@ export class Repository {
             updated_at = now()
         WHERE workspace_id = $1 AND id = $2
         RETURNING id
-      `, [workspaceId, invoiceId, update.status, update.stripeInvoiceId ?? null, update.paymentUrl ?? null, update.paidAt ?? null, update.lastError ?? null]);
+      `, [workspaceId, invoiceId, update.status, update.stripeInvoiceId ?? null, update.paymentUrl ?? null, update.paidAt ?? null, update.lastError ?? null, update.companyName ?? null]);
       if (!result.rows[0]) return null;
       return (await this.loadInvoices(client, workspaceId, undefined, invoiceId))[0] ?? null;
     });
@@ -1162,6 +1205,7 @@ export class Repository {
       invoice_id: string;
       customer_id: string;
       invoice_number: string;
+      company_name: string | null;
       billing_model: InvoiceRecord['billingModel'];
       status: InvoiceRecord['status'];
       currency: string;
@@ -1184,7 +1228,8 @@ export class Repository {
       line_total_cents: number | null;
       line_currency: string | null;
     }>(`
-      SELECT i.id AS invoice_id, i.customer_id, i.invoice_number, i.status, i.billing_model, i.currency,
+      SELECT i.id AS invoice_id, i.customer_id, i.invoice_number,
+             CASE WHEN i.status = 'draft' THEN ws.display_name ELSE i.company_name END AS company_name, i.status, i.billing_model, i.currency,
              i.subtotal_cents, i.fee_cents, i.total_cents, i.due_at,
              i.created_at AS invoice_created_at, i.paid_at, i.hosted_invoice_url, i.last_error,
              l.id AS line_id, l.order_id, l.description,
@@ -1192,6 +1237,7 @@ export class Repository {
              l.fee_cents AS line_fee_cents, l.total_cents AS line_total_cents,
              l.currency AS line_currency
       FROM invoices i
+      LEFT JOIN workspace_settings ws ON ws.workspace_id = i.workspace_id
       LEFT JOIN invoice_lines l
         ON l.workspace_id = i.workspace_id AND l.invoice_id = i.id
       WHERE ${clauses.join(' AND ')}
@@ -1203,6 +1249,8 @@ export class Repository {
       if (!invoice) {
         invoice = {
           id: row.invoice_id,
+          workspaceId,
+          companyName: row.company_name,
           customerId: row.customer_id,
           invoiceNumber: row.invoice_number,
           billingModel: row.billing_model,
@@ -1322,6 +1370,7 @@ function hashPortalToken(token: string): string {
 }
 
 function toWorkspaceSettings(row: {
+  theme: WorkspaceTheme;
   display_name: string;
   logo_url: string | null;
   accent_color: string;
@@ -1329,6 +1378,7 @@ function toWorkspaceSettings(row: {
   venmo_payment_url: string | null;
 }): WorkspaceSettingsRecord {
   return {
+    theme: row.theme,
     displayName: row.display_name,
     logoUrl: row.logo_url,
     accentColor: row.accent_color,

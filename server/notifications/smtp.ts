@@ -68,7 +68,7 @@ export class SmtpNotifier {
 
 function invoiceMessage(invoice: InvoiceRecord, lead: string) {
   const amount = `${invoice.currency} ${(invoice.totalCents / 100).toFixed(2)}`;
-  return `<div style="font-family:Arial,sans-serif;line-height:1.5"><p>${escapeHtml(lead)}</p><p><strong>${escapeHtml(invoice.invoiceNumber)}</strong><br/>Service fees: ${escapeHtml(amount)}</p><p>This invoice does not include retailer purchase amounts.</p></div>`;
+  return `<div style="font-family:Arial,sans-serif;line-height:1.5">${invoice.companyName ? `<h2>${escapeHtml(invoice.companyName)}</h2>` : ''}<p>${escapeHtml(lead)}</p><p><strong>${escapeHtml(invoice.invoiceNumber)}</strong><br/>Service fees: ${escapeHtml(amount)}</p><p>This invoice does not include retailer purchase amounts.</p></div>`;
 }
 
 function escapeHtml(value: string) {

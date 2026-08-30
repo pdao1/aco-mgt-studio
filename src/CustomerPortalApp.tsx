@@ -38,6 +38,10 @@ export default function CustomerPortalApp({ token }: CustomerPortalAppProps) {
     if (payload && selectedOrderId === null) setSelectedOrderId(payload.orders[0]?.id ?? null);
   }, [payload]);
 
+  useEffect(() => {
+    document.title = payload ? `${payload.workspace.settings.displayName} | Customer portal` : 'Customer portal';
+  }, [payload?.workspace.settings.displayName]);
+
   if (loading) return <PortalState title="Loading your orders" detail="Securely fetching the latest order activity." loading />;
   if (error || !payload) return <PortalState title="Customer link unavailable" detail={error || 'This customer link is invalid or has expired.'} />;
 
@@ -81,7 +85,7 @@ function PortalView({
   const initials = payload.customer.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
   return (
-    <div className="portal-shell" style={{ '--blue': payload.workspace.settings.accentColor } as CSSProperties}>
+    <div className="portal-shell" data-theme={payload.workspace.settings.theme} style={{ '--blue': payload.workspace.settings.accentColor } as CSSProperties}>
       <header className="portal-header">
         <div className="portal-brand">{payload.workspace.settings.logoUrl ? <img src={payload.workspace.settings.logoUrl} alt="" /> : null}{brandName}</div>
         <div className="portal-header-divider" />
@@ -175,7 +179,7 @@ function PortalInvoices({ invoices, venmoPaymentUrl }: { invoices: PortalPayload
   return (
     <section className="portal-invoices-card" aria-labelledby="portal-invoices-title">
       <div className="portal-invoices-heading"><div><h2 id="portal-invoices-title">Invoices</h2><p>Review your service fees and pay securely through Stripe or Venmo.</p></div><ShieldCheck size={18} /></div>
-      {invoices.length === 0 ? <div className="portal-invoice-empty">Invoices will appear here after your account manager issues one.</div> : <div className="portal-invoice-list">{invoices.map((invoice) => <div className="portal-invoice-row" key={invoice.id}><span><strong>{invoice.invoiceNumber}</strong><small>{formatDate(invoice.createdAt)} · {invoice.lines.length} orders</small></span><strong>{formatMoney(invoice.totalCents, invoice.currency)}</strong><span className={`portal-status ${invoice.status}`}>{invoice.status}</span><span className="portal-payment-actions">{invoice.paymentUrl ? <a className="portal-pay-link" href={invoice.paymentUrl} target="_blank" rel="noreferrer">Pay with Stripe <ExternalLink size={14} /></a> : invoice.status === 'draft' ? <span className="portal-invoice-note">Being prepared</span> : <span className="portal-invoice-note">Stripe unavailable</span>}{venmoPaymentUrl && invoice.status !== 'paid' ? <a className="portal-venmo-link" href={venmoPaymentUrl} target="_blank" rel="noreferrer">Pay with Venmo <ExternalLink size={14} /></a> : null}</span></div>)}</div>}
+      {invoices.length === 0 ? <div className="portal-invoice-empty">Invoices will appear here after your account manager issues one.</div> : <div className="portal-invoice-list">{invoices.map((invoice) => <div className="portal-invoice-row" key={invoice.id}><span><strong>{invoice.invoiceNumber}</strong><small>{invoice.companyName && <>{invoice.companyName} · </>}{formatDate(invoice.createdAt)} · {invoice.lines.length} orders</small></span><strong>{formatMoney(invoice.totalCents, invoice.currency)}</strong><span className={`portal-status ${invoice.status}`}>{invoice.status}</span><span className="portal-payment-actions">{invoice.paymentUrl ? <a className="portal-pay-link" href={invoice.paymentUrl} target="_blank" rel="noreferrer">Pay with Stripe <ExternalLink size={14} /></a> : invoice.status === 'draft' ? <span className="portal-invoice-note">Being prepared</span> : <span className="portal-invoice-note">Stripe unavailable</span>}{venmoPaymentUrl && invoice.status !== 'paid' ? <a className="portal-venmo-link" href={venmoPaymentUrl} target="_blank" rel="noreferrer">Pay with Venmo <ExternalLink size={14} /></a> : null}</span></div>)}</div>}
     </section>
   );
 }

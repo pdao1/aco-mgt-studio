@@ -12,7 +12,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - Cheap mailbox gates ignore one-time PIN/verification-code mail and oversized non-order messages before MIME parsing; skipped messages are recorded as processed so the same noise is not revisited.
 - Generic parsing for order number, merchant, total, pending/confirmed/processing/shipped/delivered/cancelled status, UPS/USPS/FedEx/Amazon tracking, tracking URLs, and estimated delivery dates. Generic acknowledgements stay pending until a matching explicit confirmation email is seen.
 - PostgreSQL workspace isolation with forced row-level security on customer, mailbox, order, shipment, event, processed-message, sync-run, invoice, invoice-line, and Stripe-event tables.
-- An operator-password login backed by a signed, `HttpOnly`, `SameSite=Strict` session cookie.
+- Per-workspace operator passwords stored as salted scrypt hashes, backed by a signed, `HttpOnly`, `SameSite=Strict` session cookie.
 - A customer-facing portal at `/portal/:token`, reached through a persistent random link. The token is stored as a hash plus an encrypted recovery value and only returns that customer's normalized orders. Legacy seven-day signed links remain readable during transition.
 - Per-order fee percentages (0–100%, stored as integer basis points) calculated from either the checkout purchase total or a custom amount such as expected sale value or profit.
 - Draft invoices snapshot selected service fees, preserve the purchase and fee basis as informational references, and lock fee edits after issue. Stripe Invoicing charges only ACO service fees; signed webhooks update paid/open/void states idempotently.
@@ -22,7 +22,7 @@ ACO Studio is a secure customer order, shipment, and billing workspace for ACO o
 - Order identifiers must contain at least one digit. Legacy prose-only parser artifacts are excluded from dashboards and billing without deleting the underlying history.
 - A beta serial gate protects the operator surface. The serial is server-side (`SERVICE_SERIAL`) and unlocks a signed, HttpOnly access cookie; it is never shipped to the browser.
 - `/` is the public marketing site, `/app/dashboard` is the operator app, and `/app/admin/super` is reserved for the service owner.
-- Each workspace can set its customer-facing name, HTTPS logo, accent color, seller notification email, and Venmo payment URL. SMTP invoice notifications are optional and disabled until configured.
+- Each workspace can set its ACO Company Name, one of four light or four dark themes, operator password, HTTPS logo, accent color, seller notification email, and Venmo payment URL. Company identity and themes apply to the operator dashboard and customer portal; new Stripe invoices and invoice emails include the company name. Drafts follow name changes; issued invoice names are preserved. SMTP invoice notifications are optional and disabled until configured.
 - A versioned `orders.ingestion.v1` workflow seam separates extract, normalize, deterministic parse, optional AI item review/order repair, and load stages. With `OPENAI_KEY`, a bounded GPT-5 nano pass reviews suspicious item rows or repairs an order-like message that deterministic parsing could not normalize. Each message gets at most two structured attempts, and the second attempt receives explicit validation feedback; without it, sync stays deterministic and network-free beyond Gmail.
 - Optional server-side USPS, UPS, and FedEx tracking polling updates shipment status and expected delivery without exposing carrier credentials to the browser. Each provider requires its own developer account/keys; the adapters do not call a carrier when credentials are absent.
 - A Docker/PostgreSQL runtime and a Render Blueprint.
@@ -48,8 +48,7 @@ repeated `/api` proxy errors.
 
 The local Docker database uses host port `55432` so it does not collide with a
 native PostgreSQL installation on the standard port `5432`.
-Read `OPERATOR_PASSWORD` from `.env`, open `http://127.0.0.1:5173`, and sign
-in. ACO Studio starts empty and only shows customers and orders that have been
+Open `http://127.0.0.1:5173/app`, enter `SERVICE_SERIAL` from `.env`, then choose **New company? Create a workspace**. Choose a unique workspace ID, company name, and password (at least 12 characters). ACO Studio starts empty and only shows customers and orders that have been
 connected and synchronized.
 
 Use `npm run dev:web` only when an API is already running on port 3001. It
@@ -70,7 +69,6 @@ Use one output for `MAILBOX_ENCRYPTION_KEY`, a different output for `SESSION_SEC
 MAILBOX_ENCRYPTION_KEY=<first generated value>
 SESSION_SECRET=<second generated value>
 PORTAL_SECRET=<third generated value>
-OPERATOR_PASSWORD=<a long unique operator password>
 POSTGRES_PASSWORD=<a long local database password>
 ```
 
@@ -80,7 +78,7 @@ Then start the application and PostgreSQL:
 docker compose up --build
 ```
 
-Open `http://localhost:3001` and sign in with `OPERATOR_PASSWORD`. Database migrations run automatically before the web server starts.
+Open `http://localhost:3001/app`, activate service access, and create or sign in to your company workspace. Database migrations run automatically before the web server starts.
 
 Enter the generated beta serial, sign in, and select a customer to copy a static portal link. Render links use the HTTPS `APP_ORIGIN` you configure.
 
@@ -98,11 +96,9 @@ billing domains. Stripe handles an ACO operator's downstream customer fee
 invoices. A future Whop adapter will verify subscription events and provision
 one isolated workspace/node group for each subscribed ACO business.
 
-The database includes the provider-neutral workspace, entitlement, membership,
-and event-deduplication boundary required for that adapter. No live Whop webhook,
-Whop authentication, or subscription checkout is claimed yet. Until that
-adapter is implemented, the application continues to start one local workspace
-from `WORKSPACE_SLUG` and authenticate it with `OPERATOR_PASSWORD`.
+Workspace registration is currently protected by the platform service serial, not subscription entitlements. Each company chooses a unique workspace ID and password at `/app`; its stable sign-in link is `/app/workspaces/:slug`. Settings and credentials are tenant-scoped. Mailbox and carrier polling visit active workspaces, and Stripe events route using workspace metadata.
+
+For existing installations only, `OPERATOR_PASSWORD`, `WORKSPACE_SLUG`, and `WORKSPACE_NAME` remain optional bootstrap inputs. The password is imported once as a salted hash. Subsequent restarts never reset a workspace's saved name, password, or status. Remove the legacy password from the environment after migration. Existing installations can sign in using workspace ID `default` (or their configured slug). Company name changes do not change the workspace ID or customer links. Changing the workspace password invalidates other operator sessions. Historical invoices without an issuer snapshot remain unbranded rather than being relabeled retroactively.
 
 ## Run against an existing PostgreSQL database
 
@@ -130,7 +126,7 @@ Node runtime, which runs the existing `npm run build` and `npm start` commands;
 the included `Dockerfile` remains an optional local or reproducible-container
 deployment path.
 
-1. Set `SERVICE_SERIAL` and `OPERATOR_PASSWORD` to long unique values.
+1. Set `SERVICE_SERIAL` to a long unique value. Each company creates its own workspace password in the app.
 2. Set `APP_ORIGIN` to the final HTTPS origin, for example `https://aco-studio.onrender.com`.
 3. Keep the generated `MAILBOX_ENCRYPTION_KEY`, `SESSION_SECRET`, and `PORTAL_SECRET` permanently. Losing or rotating the mailbox key without a migration makes existing mailbox secrets unreadable; rotating the portal key invalidates existing customer links.
 4. Deploy, check `/api/health`, activate the service with `SERVICE_SERIAL`, sign in, set each order's fee percentage in the inspector, and copy a static customer portal link.
@@ -138,9 +134,8 @@ deployment path.
 6. Optionally configure carrier developer credentials (`USPS_CLIENT_ID`/`USPS_CLIENT_SECRET`, `UPS_CLIENT_ID`/`UPS_CLIENT_SECRET`, and `FEDEX_API_KEY`/`FEDEX_SECRET_KEY`). The server polls active shipments every `TRACKING_SYNC_INTERVAL_MINUTES` (default 30) and stops polling delivered/cancelled shipments. USPS, UPS, and FedEx each require a registered developer project even where the basic tracking tier is free.
 
 SMTP notifications use `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
-`SMTP_PASSWORD`, and `SMTP_FROM`. Set `NOTIFICATION_SELLER_EMAIL` as a fallback,
-then refine the seller recipient per ACO in Settings. Set `VENMO_PAYMENT_URL` as
-an optional initial value or configure it per ACO in Settings. Venmo is an
+`SMTP_PASSWORD`, and `SMTP_FROM`. Set seller notification email and Venmo payment URL
+per ACO in Settings. Venmo is an
 external payment link; it does not mark an invoice paid automatically. Reconcile
 Venmo payments manually or through a future provider webhook.
 

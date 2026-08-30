@@ -13,7 +13,7 @@ const booleanFromEnv = z.preprocess(
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
   MAILBOX_ENCRYPTION_KEY: z.string().min(1),
-  OPERATOR_PASSWORD: z.string().min(12),
+  OPERATOR_PASSWORD: z.preprocess((value) => value === '' ? undefined : value, z.string().min(12).optional()),
   SESSION_SECRET: z.string().min(24),
   PORTAL_SECRET: z.string().min(24),
   STRIPE_SECRET_KEY: optionalSecret,
@@ -61,7 +61,7 @@ const schema = z.object({
 export type AppConfig = {
   databaseUrl: string;
   mailboxEncryptionKey: string;
-  operatorPassword: string;
+  operatorPassword: string | null;
   sessionSecret: string;
   portalSecret: string;
   stripeSecretKey: string | null;
@@ -112,7 +112,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   return {
     databaseUrl: value.DATABASE_URL,
     mailboxEncryptionKey: value.MAILBOX_ENCRYPTION_KEY,
-    operatorPassword: value.OPERATOR_PASSWORD,
+    operatorPassword: value.OPERATOR_PASSWORD ?? null,
     sessionSecret: value.SESSION_SECRET,
     portalSecret: value.PORTAL_SECRET,
     stripeSecretKey: value.STRIPE_SECRET_KEY ?? null,

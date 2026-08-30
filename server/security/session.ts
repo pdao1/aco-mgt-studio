@@ -6,6 +6,7 @@ const SESSION_DURATION_MS = 12 * 60 * 60 * 1000;
 
 interface SessionPayload {
   workspaceId: string;
+  sessionVersion?: number;
   expiresAt: number;
 }
 
@@ -13,6 +14,7 @@ declare global {
   namespace Express {
     interface Request {
       workspaceId?: string;
+      sessionVersion?: number;
     }
   }
 }
@@ -28,8 +30,9 @@ export function issueSession(
   workspaceId: string,
   secret: string,
   secure: boolean,
+  sessionVersion = 0,
 ) {
-  const payload: SessionPayload = { workspaceId, expiresAt: Date.now() + SESSION_DURATION_MS };
+  const payload: SessionPayload = { workspaceId, sessionVersion, expiresAt: Date.now() + SESSION_DURATION_MS };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const signature = sign(encoded, secret);
   response.cookie(COOKIE_NAME, `${encoded}.${signature}`, {
@@ -61,6 +64,7 @@ export function requireSession(secret: string) {
       const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as SessionPayload;
       if (!payload.workspaceId || !payload.expiresAt || payload.expiresAt <= Date.now()) throw new Error('Expired');
       request.workspaceId = payload.workspaceId;
+      request.sessionVersion = payload.sessionVersion ?? 0;
       next();
     } catch {
       response.status(401).json({ error: 'INVALID_SESSION', message: 'Your session has expired. Sign in again.' });

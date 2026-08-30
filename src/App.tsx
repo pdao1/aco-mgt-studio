@@ -37,6 +37,13 @@ export default function App() {
   const refresh = async () => {
     try {
       const [payload, billingPayload] = await Promise.all([api.dashboard(), api.billing()]);
+      const routeSlug = window.location.pathname.match(/^\/app\/workspaces\/([^/]+)/)?.[1];
+      if (routeSlug && decodeURIComponent(routeSlug) !== payload.workspace.slug) {
+        setData(null);
+        setBilling({ invoices: [] });
+        setNeedsLogin(true);
+        return;
+      }
       setData(payload);
       setBilling(billingPayload);
       setNeedsLogin(false);
@@ -178,9 +185,15 @@ export default function App() {
     await refresh();
   };
 
+  useEffect(() => {
+    document.title = data ? `${data.workspace.settings.displayName} | ACO Studio` : 'ACO Studio';
+  }, [data?.workspace.settings.displayName]);
+
   const saveSettings = async (settings: WorkspaceSettings) => {
     const result = await api.updateSettings(settings);
-    setData((current) => current ? { ...current, workspace: { ...current.workspace, settings: result.settings } } : current);
+    setData((current) => current ? { ...current, workspace: { ...current.workspace, name: result.settings.displayName, settings: result.settings } } : current);
+    setBilling((current) => ({ invoices: current.invoices.map((invoice) => invoice.status === 'draft'
+      ? { ...invoice, companyName: result.settings.displayName } : invoice) }));
   };
 
   const connectCustomer = async (input: ConnectCustomerInput) => {
@@ -230,8 +243,10 @@ export default function App() {
     window.setTimeout(() => setToast(''), 4200);
   };
 
-  const login = async (password: string) => {
-    await api.login(password);
+  const login = async (password: string, slug: string, companyName?: string) => {
+    if (companyName !== undefined) await api.register(password, slug, companyName);
+    else await api.login(password, slug);
+    window.history.replaceState(null, '', `/app/workspaces/${encodeURIComponent(slug)}`);
     setNeedsLogin(false);
     setLoading(true);
     await refresh();
@@ -250,7 +265,7 @@ export default function App() {
   if (loadError || !data) return <WorkspaceState detail={loadError || 'The workspace is unavailable.'} onRetry={() => { setLoading(true); setLoadError(''); void refresh(); }} />;
 
   return (
-    <main className={`app-shell ${selectedOrder && nav === 'customers' ? 'has-inspector' : ''}`} style={{ '--blue': data.workspace.settings.accentColor } as CSSProperties}>
+    <main className={`app-shell ${selectedOrder && nav === 'customers' ? 'has-inspector' : ''}`} data-theme={data.workspace.settings.theme} style={{ '--blue': data.workspace.settings.accentColor } as CSSProperties}>
       <Sidebar active={nav} workspace={data.workspace} onNavigate={navigate} onLogout={logout} />
       <CustomerRail
         customers={data.customers}
@@ -262,7 +277,7 @@ export default function App() {
       <section className={`workspace ${nav}-workspace`}>
         {nav === 'overview' && <OverviewView customers={data.customers} orders={data.orders} onOpenCustomer={openCustomerOrder} />}
         {nav === 'billing' && <BillingView customer={selectedCustomer} orders={customerOrders} invoices={billing.invoices} onCreateInvoice={createInvoice} onIssueInvoice={issueInvoice} />}
-        {nav === 'settings' && <SettingsView settings={data.workspace.settings} onSave={saveSettings} />}
+        {nav === 'settings' && <SettingsView settings={data.workspace.settings} workspaceSlug={data.workspace.slug} onSave={saveSettings} onChangePassword={api.changePassword} />}
         {nav === 'customers' && (selectedCustomer ? (
           <>
             <header className="workspace-header">

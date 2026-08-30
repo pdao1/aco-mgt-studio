@@ -1,3 +1,5 @@
+import type { WorkspaceTheme } from './lib/themes.js';
+
 export type OrderStatus =
   | 'pending'
   | 'confirmed'
@@ -15,6 +17,7 @@ export type InvoiceStatus = Exclude<BillingStatus, 'unbilled'>;
 export type FeeBasis = 'checkout_total' | 'custom_amount';
 
 export interface WorkspaceSettings {
+  theme: WorkspaceTheme;
   displayName: string;
   logoUrl: string | null;
   accentColor: string;
@@ -24,6 +27,7 @@ export interface WorkspaceSettings {
 
 export interface WorkspaceSummary {
   id: string;
+  slug: string;
   name: string;
   nodeGroupKey: string;
   status: 'provisioning' | 'active' | 'suspended';
@@ -101,6 +105,7 @@ export interface InvoiceLine {
 
 export interface Invoice {
   id: string;
+  companyName: string | null;
   customerId: string;
   invoiceNumber: string;
   status: InvoiceStatus;

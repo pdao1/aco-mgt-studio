@@ -5,6 +5,7 @@ import CustomerPortalApp from './CustomerPortalApp';
 import MarketingSite from './MarketingSite';
 import SuperAdminView from './SuperAdminView';
 import './styles.css';
+import './themes.css';
 
 const portalPrefix = '/portal/';
 const isPortalRoute = window.location.pathname.startsWith(portalPrefix);

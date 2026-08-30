@@ -68,7 +68,11 @@ export class StripeBillingGateway {
         metadata: {
           aco_invoice_id: invoice.id,
           aco_customer_id: customer.id,
+          aco_workspace_id: invoice.workspaceId,
+          aco_company_name: invoice.companyName ?? '',
         },
+        description: invoice.companyName ? `${invoice.companyName} — ACO service fees` : 'ACO service fees',
+        footer: invoice.companyName ?? undefined,
       }, {
         idempotencyKey: `aco-invoice-${invoice.id}`,
       });

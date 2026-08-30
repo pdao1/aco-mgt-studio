@@ -24,48 +24,63 @@ import {
   enforceOrigin,
   issueSession,
   loginRateLimit,
-  operatorPasswordMatches,
   requireSession,
 } from './security/session.js';
+
+import { hashPassword, verifyPassword } from './security/password.js';
+import { THEME_IDS } from '../src/lib/themes.js';
 
 const config = loadConfig();
 await runMigrations(config.databaseUrl, config.nodeEnv === 'production');
 
 const repository = new Repository(config.databaseUrl, config.nodeEnv === 'production');
-const workspaceId = await repository.ensureWorkspace(config.workspaceSlug, config.workspaceName);
-const existingSettings = await repository.getWorkspaceSettings(workspaceId);
-if ((config.venmoPaymentUrl && !existingSettings.venmoPaymentUrl) || (config.notificationSellerEmail && !existingSettings.notificationSellerEmail)) {
-  await repository.updateWorkspaceSettings(workspaceId, {
-    ...existingSettings,
-    venmoPaymentUrl: existingSettings.venmoPaymentUrl ?? config.venmoPaymentUrl,
-    notificationSellerEmail: existingSettings.notificationSellerEmail ?? config.notificationSellerEmail,
-  });
+// Legacy env values only bootstrap an existing installation. Database settings win thereafter.
+const legacyWorkspaceId = config.operatorPassword
+  ? await repository.ensureWorkspace(config.workspaceSlug, config.workspaceName)
+  : await repository.findWorkspaceIdBySlug(config.workspaceSlug);
+if (legacyWorkspaceId && config.operatorPassword) {
+  await repository.bootstrapPassword(legacyWorkspaceId, await hashPassword(config.operatorPassword));
 }
 const secretBox = new SecretBox(config.mailboxEncryptionKey);
 const orderEnricher = config.openaiKey
   ? new OpenAIOrderEnrichmentProvider(config.openaiKey, config.openaiModel)
   : undefined;
-const syncCoordinator = new MailboxSyncCoordinator(
-  repository,
-  secretBox,
-  workspaceId,
-  config.syncMaxMessages,
-  orderEnricher,
-  config.openaiMaxReviewsPerSync,
-);
-syncCoordinator.startPolling(config.syncIntervalMinutes);
 const carrierTrackingProvider = new CompositeCarrierTrackingProvider([
   new UspsTrackingProvider(config.uspsClientId, config.uspsClientSecret),
   new UpsTrackingProvider(config.upsClientId, config.upsClientSecret, config.upsTransactionSrc),
   new FedexTrackingProvider(config.fedexApiKey, config.fedexSecretKey, config.fedexAccountNumber),
 ]);
-const trackingCoordinator = new TrackingSyncCoordinator(
-  repository,
-  workspaceId,
-  carrierTrackingProvider,
-  config.trackingMaxShipmentsPerSync,
-);
-trackingCoordinator.startPolling(config.trackingSyncIntervalMinutes);
+const coordinators = new Map<string, { mailbox: MailboxSyncCoordinator; tracking: TrackingSyncCoordinator }>();
+function workspaceCoordinators(id: string) {
+  let pair = coordinators.get(id);
+  if (!pair) {
+    pair = {
+      mailbox: new MailboxSyncCoordinator(repository, secretBox, id, config.syncMaxMessages, orderEnricher, config.openaiMaxReviewsPerSync),
+      tracking: new TrackingSyncCoordinator(repository, id, carrierTrackingProvider, config.trackingMaxShipmentsPerSync),
+    };
+    coordinators.set(id, pair);
+  }
+  return pair;
+}
+// One bounded scheduling loop per job type; tenant lists are refreshed on every pass.
+let mailboxPolling = false;
+let trackingPolling = false;
+const mailboxTimer = setInterval(() => {
+  if (mailboxPolling) return;
+  mailboxPolling = true;
+  void repository.listActiveWorkspaceIds().then(async (ids) => {
+    for (const id of ids) await workspaceCoordinators(id).mailbox.syncAll();
+  }).catch(() => console.warn('[mailbox-sync] Poll failed; will retry.')).finally(() => { mailboxPolling = false; });
+}, config.syncIntervalMinutes * 60_000);
+const trackingTimer = setInterval(() => {
+  if (trackingPolling || !carrierTrackingProvider.configured) return;
+  trackingPolling = true;
+  void repository.listActiveWorkspaceIds().then(async (ids) => {
+    for (const id of ids) await workspaceCoordinators(id).tracking.syncAll();
+  }).catch(() => console.warn('[tracking-sync] Poll failed; will retry.')).finally(() => { trackingPolling = false; });
+}, config.trackingSyncIntervalMinutes * 60_000);
+mailboxTimer.unref();
+trackingTimer.unref();
 const stripeGateway = new StripeBillingGateway(config.stripeSecretKey);
 const smtpNotifier = new SmtpNotifier({
   host: config.smtpHost,
@@ -96,8 +111,14 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '
   }
   try {
     const event = stripeGateway.constructWebhookEvent(request.body, signature, config.stripeWebhookSecret);
-    const accepted = await repository.recordStripeEvent(workspaceId, event.id, event.type);
-    if (accepted) await applyStripeEvent(event);
+    if (['invoice.paid', 'invoice.voided', 'invoice.marked_uncollectible', 'invoice.finalized', 'invoice.payment_failed'].includes(event.type)) {
+      const object = event.data.object as { metadata?: Record<string, string> };
+      const eventWorkspaceId = object.metadata?.aco_workspace_id ?? legacyWorkspaceId;
+      if (eventWorkspaceId && isUuid(eventWorkspaceId)) {
+        const accepted = await repository.recordStripeEvent(eventWorkspaceId, event.id, event.type);
+        if (accepted) await applyStripeEvent(event, eventWorkspaceId);
+      }
+    }
     response.json({ received: true });
   } catch (error) {
     if (error instanceof StripeNotConfiguredError) {
@@ -133,7 +154,10 @@ app.get('/api/health', async (_request, response) => {
   }
 });
 
-const loginSchema = z.object({ password: z.string().min(1).max(512) }).strict();
+const workspaceSlugSchema = z.string().trim().toLowerCase().min(1).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+const loginSchema = z.object({ workspaceSlug: workspaceSlugSchema.default(config.workspaceSlug), password: z.string().min(1).max(512) }).strict();
+const registerSchema = z.object({ workspaceSlug: workspaceSlugSchema, displayName: z.string().trim().min(1).max(120), password: z.string().min(12).max(512) }).strict();
+const authLimiter = loginRateLimit();
 const accessSchema = z.object({ serial: z.string().trim().min(1).max(512) }).strict();
 app.post('/api/access/activate', (request, response) => {
   const parsed = accessSchema.safeParse(request.body);
@@ -145,14 +169,37 @@ app.post('/api/access/activate', (request, response) => {
   response.json({ ok: true });
 });
 
-app.post('/api/auth/login', requireServiceAccess(config.sessionSecret, config.serviceSerial), loginRateLimit(), (request, response) => {
+app.post('/api/auth/login', requireServiceAccess(config.sessionSecret, config.serviceSerial), authLimiter, async (request, response, next) => {
   const parsed = loginSchema.safeParse(request.body);
-  if (!parsed.success || !operatorPasswordMatches(parsed.data.password, config.operatorPassword)) {
-    response.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'The workspace password is incorrect.' });
+  try {
+    const credentials = parsed.success ? await repository.credentialsForSlug(parsed.data.workspaceSlug) : null;
+    const matches = await verifyPassword(parsed.success ? parsed.data.password : '', credentials?.password_hash ?? null);
+    if (!matches || !credentials) {
+      response.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'The workspace ID or password is incorrect.' });
+      return;
+    }
+    issueSession(response, credentials.workspaceId, config.sessionSecret, config.nodeEnv === 'production', credentials.session_version);
+    response.json({ ok: true });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/auth/register', requireServiceAccess(config.sessionSecret, config.serviceSerial), authLimiter, async (request, response, next) => {
+  const parsed = registerSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: 'INVALID_WORKSPACE', message: 'Enter a company name, a workspace ID using lowercase letters, numbers or hyphens, and a password of at least 12 characters.' });
     return;
   }
-  issueSession(response, workspaceId, config.sessionSecret, config.nodeEnv === 'production');
-  response.json({ ok: true });
+  try {
+    const id = await repository.createWorkspace(parsed.data.workspaceSlug, parsed.data.displayName, await hashPassword(parsed.data.password));
+    issueSession(response, id, config.sessionSecret, config.nodeEnv === 'production');
+    response.status(201).json({ ok: true });
+  } catch (error) {
+    if (isPostgresUniqueViolation(error)) {
+      response.status(409).json({ error: 'WORKSPACE_EXISTS', message: 'That workspace ID is already in use. Choose another or sign in.' });
+      return;
+    }
+    next(error);
+  }
 });
 
 app.post('/api/auth/logout', (_request, response) => {
@@ -188,6 +235,41 @@ app.get('/api/public/portal/:token', async (request, response, next) => {
 });
 
 app.use('/api', requireServiceAccess(config.sessionSecret, config.serviceSerial), requireSession(config.sessionSecret));
+app.use('/api', async (request, response, next) => {
+  try {
+    const credentials = await repository.getCredentials(request.workspaceId!);
+    if (!credentials || credentials.session_version !== request.sessionVersion) {
+      clearSession(response, config.nodeEnv === 'production');
+      response.status(401).json({ error: 'INVALID_SESSION', message: 'Your session has expired. Sign in again.' });
+      return;
+    }
+    response.setHeader('Cache-Control', 'private, no-store');
+    next();
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/settings/password', authLimiter, async (request, response, next) => {
+  const parsed = z.object({ currentPassword: z.string().min(1).max(512), newPassword: z.string().min(12).max(512) }).strict().safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: 'INVALID_PASSWORD', message: 'Enter your current password and a new password of at least 12 characters.' });
+    return;
+  }
+  try {
+    const credentials = await repository.getCredentials(request.workspaceId!);
+    if (!await verifyPassword(parsed.data.currentPassword, credentials?.password_hash ?? null) || !credentials) {
+      response.status(401).json({ error: 'INVALID_PASSWORD', message: 'The current password is incorrect.' });
+      return;
+    }
+    const version = await repository.changePassword(request.workspaceId!, credentials.password_hash, await hashPassword(parsed.data.newPassword));
+    if (version === null) {
+      response.status(409).json({ error: 'PASSWORD_CHANGED', message: 'The password changed in another session. Sign in again.' });
+      return;
+    }
+    issueSession(response, request.workspaceId!, config.sessionSecret, config.nodeEnv === 'production', version);
+    response.json({ ok: true });
+  } catch (error) { next(error); }
+});
+
 
 app.get('/api/dashboard', async (request, response, next) => {
   try {
@@ -214,6 +296,7 @@ app.get('/api/settings', async (request, response, next) => {
 });
 
 const settingsSchema = z.object({
+  theme: z.enum(THEME_IDS).optional(),
   displayName: z.string().trim().min(1).max(120).optional(),
   logoUrl: z.string().url().refine((value) => value.startsWith('https://'), 'Logo URL must use HTTPS.').nullable().optional(),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
@@ -314,6 +397,7 @@ app.post('/api/invoices/:invoiceId/issue', async (request, response, next) => {
     await repository.setStripeCustomerId(request.workspaceId!, invoice.customerId, stripeInvoice.stripeCustomerId);
     const updated = await repository.updateInvoiceStripeState(request.workspaceId!, invoice.id, {
       status: 'open',
+      companyName: invoice.companyName,
       stripeInvoiceId: stripeInvoice.stripeInvoiceId,
       paymentUrl: stripeInvoice.paymentUrl,
       lastError: null,
@@ -357,7 +441,7 @@ app.post('/api/customers', async (request, response, next) => {
       syncDays: parsed.data.syncDays,
       secretCiphertext: secretBox.encrypt(parsed.data.appPassword),
     });
-    syncCoordinator.enqueue(customer.id);
+    workspaceCoordinators(request.workspaceId!).mailbox.enqueue(customer.id);
     response.status(201).json({ customer });
   } catch (error) {
     if (isPostgresUniqueViolation(error)) {
@@ -381,7 +465,7 @@ app.post('/api/customers/:customerId/sync', async (request, response) => {
   // A manual sync is an intentional repair/backfill operation. It scans the
   // customer's configured history so new item/cancellation parsers can repair
   // messages that were previously marked as processed.
-  syncCoordinator.enqueue(request.params.customerId, { fullHistory: true });
+  workspaceCoordinators(request.workspaceId!).mailbox.enqueue(request.params.customerId, { fullHistory: true });
   response.status(202).json({ accepted: true });
 });
 
@@ -508,8 +592,8 @@ const server = app.listen(config.port, '0.0.0.0', () => {
 });
 
 const shutdown = async () => {
-  syncCoordinator.stopPolling();
-  trackingCoordinator.stopPolling();
+  clearInterval(mailboxTimer);
+  clearInterval(trackingTimer);
   server.close();
   await repository.close();
   process.exit(0);
@@ -518,7 +602,7 @@ const shutdown = async () => {
 process.on('SIGTERM', () => void shutdown());
 process.on('SIGINT', () => void shutdown());
 
-async function applyStripeEvent(event: { type: string; data: { object: unknown } }) {
+async function applyStripeEvent(event: { type: string; data: { object: unknown } }, workspaceId: string) {
   const object = event.data.object as {
     id?: unknown;
     metadata?: Record<string, string | undefined>;
@@ -549,6 +633,7 @@ async function applyStripeEvent(event: { type: string; data: { object: unknown }
     : null;
   const updated = await repository.updateInvoiceStripeState(workspaceId, invoice.id, {
     status,
+    companyName: object.metadata?.aco_company_name || undefined,
     stripeInvoiceId: stripeInvoiceId ?? undefined,
     paymentUrl: typeof object.hosted_invoice_url === 'string' ? object.hosted_invoice_url : undefined,
     paidAt,
@@ -557,7 +642,7 @@ async function applyStripeEvent(event: { type: string; data: { object: unknown }
   if (status === 'paid' && updated && !wasAlreadyPaid) {
     const profile = await repository.getCustomerBillingProfile(workspaceId, invoice.customerId);
     const settings = await repository.getWorkspaceSettings(workspaceId);
-    if (profile) smtpNotifier.enqueueInvoicePaid(updated, profile.gmailAddress, settings.notificationSellerEmail ?? config.notificationSellerEmail);
+    if (profile) smtpNotifier.enqueueInvoicePaid(updated, profile.gmailAddress, settings.notificationSellerEmail);
   }
 }
 

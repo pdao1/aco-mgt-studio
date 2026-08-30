@@ -41,6 +41,8 @@ export function Sidebar({ active, workspace, onNavigate, onLogout }: SidebarProp
             key={id}
             className={active === id ? 'nav-item active' : 'nav-item'}
             onClick={() => onNavigate(id)}
+            aria-label={label}
+            title={label}
             aria-current={active === id ? 'page' : undefined}
           >
             <Icon size={19} strokeWidth={1.8} />

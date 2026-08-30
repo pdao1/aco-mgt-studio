@@ -70,16 +70,10 @@ services:
         value: "30"
       - key: TRACKING_MAX_SHIPMENTS_PER_SYNC
         value: "100"
-      - key: OPERATOR_PASSWORD
-        sync: false
       - key: APP_ORIGIN
         sync: false
       - key: NODE_ENV
         value: production
-      - key: WORKSPACE_NAME
-        value: ACO Studio
-      - key: WORKSPACE_SLUG
-        value: default
       - key: SYNC_INTERVAL_MINUTES
         value: "5"
       - key: SYNC_MAX_MESSAGES
