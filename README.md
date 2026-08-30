@@ -1,9 +1,12 @@
 # ACO Studio
 
-ACO Studio is a secure customer order, shipment, and billing workspace for ACO operators. Connect one Gmail mailbox per customer, scan order-like messages through read-only IMAP, and turn confirmations and shipping updates into a searchable customer dashboard.
+ACO Studio serves two independent products on a shared email, parsing, order, and tracking core: **ACOs** manage client orders and service-fee invoices in company workspaces; **Solo Buyers** connect their own Gmail inboxes to a private purchase dashboard with no client management or invoicing.
+
+Solo Buyers enter at `/customer` and sign in with an individual product serial or linked Discord account. Their dashboard lives at `/customer/<discord-username>` (a reserved personal handle before Discord is linked). ACOs continue using `/app` and their existing customer portals. See [Solo Buyer setup](docs/solo-buyers.md) and [carrier credentials and access](docs/tracking-setup.md).
 
 ## What is implemented
 
+- Separate Solo Buyer accounts, hashed individual serials, Discord OAuth sign-in/linking, access expiry, mailbox limits, and isolated sessions. The personal dashboard combines inboxes, purchase totals by currency, items, shipment updates, search, filters, and eight themes without exposing ACO invoice or fee fields.
 - Customer-by-customer order dashboards with status totals, search, filters, tracking links, and an event timeline.
 - A compact operator surface: Overview, Customers, Billing, and per-ACO Settings. Orders and shipments stay inside a customer view instead of becoming separate navigation tabs.
 - Gmail app-password verification before a mailbox is saved.
@@ -96,7 +99,7 @@ billing domains. Stripe handles an ACO operator's downstream customer fee
 invoices. A future Whop adapter will verify subscription events and provision
 one isolated workspace/node group for each subscribed ACO business.
 
-Workspace registration is currently protected by the platform service serial, not subscription entitlements. Each company chooses a unique workspace ID and password at `/app`; its stable sign-in link is `/app/workspaces/:slug`. Settings and credentials are tenant-scoped. Mailbox and carrier polling visit active workspaces, and Stripe events route using workspace metadata.
+ACO workspace registration is currently protected by the platform service serial, not subscription entitlements. Each company chooses a unique workspace ID and password at `/app`; its stable sign-in link is `/app/workspaces/:slug`. Settings and credentials are tenant-scoped. Mailbox and carrier polling visit active accounts (excluding expired Solo Buyer access), and Stripe events route using workspace metadata. Solo Buyer access is provisioned separately by the service owner with `npm run solo:provision`; a platform ACO serial cannot unlock a personal account. Automatic checkout/subscription provisioning is not implemented.
 
 For existing installations only, `OPERATOR_PASSWORD`, `WORKSPACE_SLUG`, and `WORKSPACE_NAME` remain optional bootstrap inputs. The password is imported once as a salted hash. Subsequent restarts never reset a workspace's saved name, password, or status. Remove the legacy password from the environment after migration. Existing installations can sign in using workspace ID `default` (or their configured slug). Company name changes do not change the workspace ID or customer links. Changing the workspace password invalidates other operator sessions. Historical invoices without an issuer snapshot remain unbranded rather than being relabeled retroactively.
 
@@ -131,7 +134,8 @@ deployment path.
 3. Keep the generated `MAILBOX_ENCRYPTION_KEY`, `SESSION_SECRET`, and `PORTAL_SECRET` permanently. Losing or rotating the mailbox key without a migration makes existing mailbox secrets unreadable; rotating the portal key invalidates existing customer links.
 4. Deploy, check `/api/health`, activate the service with `SERVICE_SERIAL`, sign in, set each order's fee percentage in the inspector, and copy a static customer portal link.
 5. Optionally set `OPENAI_KEY` to enable the bounded item-row quality pass. The default `OPENAI_MODEL=gpt-5-nano` and `OPENAI_MAX_REVIEWS_PER_SYNC=25` keep it limited; leave the key blank for deterministic-only operation.
-6. Optionally configure carrier developer credentials (`USPS_CLIENT_ID`/`USPS_CLIENT_SECRET`, `UPS_CLIENT_ID`/`UPS_CLIENT_SECRET`, and `FEDEX_API_KEY`/`FEDEX_SECRET_KEY`). The server polls active shipments every `TRACKING_SYNC_INTERVAL_MINUTES` (default 30) and stops polling delivered/cancelled shipments. USPS, UPS, and FedEx each require a registered developer project even where the basic tracking tier is free.
+6. Configure carrier developer credentials using [the tracking setup guide](docs/tracking-setup.md). The server polls active shipments every `TRACKING_SYNC_INTERVAL_MINUTES` (default 30), up to `TRACKING_MAX_SHIPMENTS_PER_SYNC` per account, and stops polling delivered/cancelled shipments. Credentials alone do not guarantee production access: USPS requires authorization and potentially a paid agreement for third-party tracking.
+7. For Solo Buyers, optionally configure `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET`, register the callback, and provision individual accounts using [the Solo Buyer setup guide](docs/solo-buyers.md).
 
 SMTP notifications use `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
 `SMTP_PASSWORD`, and `SMTP_FROM`. Set seller notification email and Venmo payment URL

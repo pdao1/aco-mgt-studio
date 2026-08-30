@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx server/index.ts",
-    "db:migrate": "tsx server/database/migrate.ts"
+    "db:migrate": "tsx server/database/migrate.ts",
+    "solo:provision": "tsx server/solo/manage.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

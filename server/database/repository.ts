@@ -166,7 +166,8 @@ export class Repository {
   }
 
   async listActiveWorkspaceIds(): Promise<string[]> {
-    const result = await this.pool.query<{ id: string }>("SELECT id FROM workspaces WHERE status = 'active'");
+    const result = await this.pool.query<{ id: string }>(`SELECT w.id FROM workspaces w WHERE w.status = 'active'
+      AND (w.product_type = 'aco' OR EXISTS (SELECT 1 FROM solo_accounts a WHERE a.workspace_id=w.id AND a.access_expires_at>now()))`);
     return result.rows.map((row) => row.id);
   }
 
@@ -207,7 +208,7 @@ export class Repository {
       const result = await client.query<{ password_hash: string; session_version: number }>(`
         SELECT c.password_hash, c.session_version FROM workspace_credentials c
         JOIN workspaces w ON w.id = c.workspace_id
-        WHERE c.workspace_id = $1 AND w.status = 'active'`, [workspaceId]);
+        WHERE c.workspace_id = $1 AND w.status = 'active' AND w.product_type = 'aco'`, [workspaceId]);
       return result.rows[0] ?? null;
     });
   }
@@ -221,7 +222,7 @@ export class Repository {
     });
   }
 
-  async dashboard(workspaceId: string) {
+  async dashboard(workspaceId: string, orderLimit: number | null = 2000) {
     return this.withWorkspace(workspaceId, async (client) => {
       const workspaceResult = await client.query<{
         id: string;
@@ -311,8 +312,8 @@ export class Repository {
         WHERE o.workspace_id = $1
           AND o.order_number ~ '[0-9]'
         ORDER BY o.ordered_at DESC
-        LIMIT 2000
-      `, [workspaceId]);
+        LIMIT $2
+      `, [workspaceId, orderLimit]);
 
       const orderIds = ordersResult.rows.map((order) => order.id);
       const eventsResult = orderIds.length === 0
@@ -908,8 +909,14 @@ export class Repository {
   async createCustomer(
     workspaceId: string,
     input: { name: string; gmailAddress: string; syncDays: number; secretCiphertext: string },
+    mailboxLimit?: number,
   ): Promise<CustomerRecord> {
     return this.withWorkspace(workspaceId, async (client) => {
+      if (mailboxLimit !== undefined) {
+        await client.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [workspaceId]);
+        const count = await client.query<{ count: string }>('SELECT count(*) FROM customer_mailboxes WHERE workspace_id=$1', [workspaceId]);
+        if (Number(count.rows[0].count) >= mailboxLimit) throw new BillingValidationError('MAILBOX_LIMIT', `Your plan supports ${mailboxLimit} connected mailboxes.`);
+      }
       const customerId = randomUUID();
       const result = await client.query<{
         id: string;
@@ -1148,7 +1155,7 @@ export class Repository {
           INSERT INTO shipments(
             id, workspace_id, customer_id, order_id, carrier, tracking_number,
             tracking_url, status, expected_delivery, delivered_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $8 = 'delivered' THEN $10 ELSE NULL END)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $8 = 'delivered' THEN $10::timestamptz ELSE NULL END)
           ON CONFLICT (workspace_id, customer_id, order_id) DO UPDATE SET
             carrier = COALESCE(EXCLUDED.carrier, shipments.carrier),
             tracking_number = COALESCE(EXCLUDED.tracking_number, shipments.tracking_number),

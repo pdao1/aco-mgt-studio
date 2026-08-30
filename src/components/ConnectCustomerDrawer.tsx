@@ -5,9 +5,10 @@ import type { ConnectCustomerInput } from '../types';
 interface ConnectCustomerDrawerProps {
   onClose: () => void;
   onConnect: (input: ConnectCustomerInput) => Promise<void>;
+  mode?: 'aco' | 'solo';
 }
 
-export function ConnectCustomerDrawer({ onClose, onConnect }: ConnectCustomerDrawerProps) {
+export function ConnectCustomerDrawer({ onClose, onConnect, mode = 'aco' }: ConnectCustomerDrawerProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [gmailAddress, setGmailAddress] = useState('');
@@ -41,10 +42,10 @@ export function ConnectCustomerDrawer({ onClose, onConnect }: ConnectCustomerDra
 
   return (
     <div className="drawer-layer" role="presentation">
-      <button className="drawer-scrim" onClick={onClose} aria-label="Close connect customer drawer" />
+      <button className="drawer-scrim" onClick={onClose} aria-label={mode === 'solo' ? 'Close connect inbox drawer' : 'Close connect customer drawer'} />
       <aside className="connect-drawer" aria-labelledby="connect-title">
         <div className="drawer-heading">
-          <h2 id="connect-title">Connect customer inbox</h2>
+          <h2 id="connect-title">{mode === 'solo' ? 'Connect your inbox' : 'Connect customer inbox'}</h2>
           <button className="icon-button bare" onClick={onClose} aria-label="Close"><X size={21} /></button>
         </div>
 
@@ -55,8 +56,8 @@ export function ConnectCustomerDrawer({ onClose, onConnect }: ConnectCustomerDra
 
         <form onSubmit={submit} className="connect-form">
           <label>
-            <span>Customer name</span>
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Enter customer name" autoFocus required />
+            <span>{mode === 'solo' ? 'Mailbox label' : 'Customer name'}</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder={mode === 'solo' ? 'e.g. Personal purchases' : 'Enter customer name'} autoFocus required />
           </label>
           <label>
             <span>Gmail address</span>

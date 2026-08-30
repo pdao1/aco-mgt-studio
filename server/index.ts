@@ -29,6 +29,7 @@ import {
 
 import { hashPassword, verifyPassword } from './security/password.js';
 import { THEME_IDS } from '../src/lib/themes.js';
+import { createSoloRouter } from './solo/routes.js';
 
 const config = loadConfig();
 await runMigrations(config.databaseUrl, config.nodeEnv === 'production');
@@ -46,9 +47,9 @@ const orderEnricher = config.openaiKey
   ? new OpenAIOrderEnrichmentProvider(config.openaiKey, config.openaiModel)
   : undefined;
 const carrierTrackingProvider = new CompositeCarrierTrackingProvider([
-  new UspsTrackingProvider(config.uspsClientId, config.uspsClientSecret),
-  new UpsTrackingProvider(config.upsClientId, config.upsClientSecret, config.upsTransactionSrc),
-  new FedexTrackingProvider(config.fedexApiKey, config.fedexSecretKey, config.fedexAccountNumber),
+  new UspsTrackingProvider(config.uspsClientId, config.uspsClientSecret, config.trackingEnvironment === 'sandbox' ? 'https://apis-tem.usps.com' : 'https://apis.usps.com'),
+  new UpsTrackingProvider(config.upsClientId, config.upsClientSecret, config.upsTransactionSrc, config.trackingEnvironment === 'sandbox' ? 'https://wwwcie.ups.com' : 'https://onlinetools.ups.com'),
+  new FedexTrackingProvider(config.fedexApiKey, config.fedexSecretKey, config.fedexAccountNumber, config.trackingEnvironment === 'sandbox' ? 'https://apis-sandbox.fedex.com' : 'https://apis.fedex.com'),
 ]);
 const coordinators = new Map<string, { mailbox: MailboxSyncCoordinator; tracking: TrackingSyncCoordinator }>();
 function workspaceCoordinators(id: string) {
@@ -233,6 +234,8 @@ app.get('/api/public/portal/:token', async (request, response, next) => {
     next(error);
   }
 });
+
+app.use('/api/solo', createSoloRouter({config,repository,secretBox,trackingProvider:carrierTrackingProvider,coordinators:workspaceCoordinators}));
 
 app.use('/api', requireServiceAccess(config.sessionSecret, config.serviceSerial), requireSession(config.sessionSecret));
 app.use('/api', async (request, response, next) => {

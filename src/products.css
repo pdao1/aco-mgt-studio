@@ -1,0 +1,6 @@
+.product-offerings { max-width:1120px; margin:0 auto; display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:20px 28px 40px; }
+.product-offerings article { border:1px solid var(--line); border-radius:8px; background:var(--surface); padding:26px; }
+.product-offerings h2 { margin:0 0 12px; font-size:22px; }
+.product-offerings p { color:var(--muted); font-size:14px; line-height:1.7; }
+.product-offerings a { display:inline-flex; align-items:center; gap:8px; margin-top:15px; text-decoration:none; }
+@media(max-width:780px) { .product-offerings {grid-template-columns:1fr;padding:20px;} }

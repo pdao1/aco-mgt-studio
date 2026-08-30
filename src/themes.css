@@ -50,9 +50,9 @@
 [data-theme] .primary-action { color: var(--surface); }
 [data-theme] .primary-action:hover { color: var(--surface); }
 [data-theme] .status-label.shipped { color: var(--blue); background: var(--surface-selected); }
-[data-theme] :is(.status-label.pending, .portal-status.pending, .portal-status.confirmed, .portal-status.processing, .portal-status.open, .invoice-status.open) { color: var(--amber); background: var(--amber-bg); }
-[data-theme] :is(.portal-status.shipped, .portal-status.delivered, .portal-status.paid, .invoice-status.paid) { color: var(--green); background: var(--green-bg); }
-[data-theme] :is(.portal-status.cancelled, .portal-status.uncollectible, .invoice-status.uncollectible) { color: var(--red); background: var(--red-bg); }
+[data-theme] :is(.status-label.pending, .status-label.confirmed, .status-label.processing, .portal-status.pending, .portal-status.confirmed, .portal-status.processing, .portal-status.open, .invoice-status.open) { color: var(--amber); background: var(--amber-bg); }
+[data-theme] :is(.status-label.delivered, .portal-status.shipped, .portal-status.delivered, .portal-status.paid, .invoice-status.paid) { color: var(--green); background: var(--green-bg); }
+[data-theme] :is(.status-label.cancelled, .portal-status.cancelled, .portal-status.uncollectible, .invoice-status.uncollectible) { color: var(--red); background: var(--red-bg); }
 [data-theme] :is(.portal-status.draft, .portal-status.void, .invoice-status.draft, .invoice-status.void) { color: var(--muted); background: var(--slate-bg); }
 [data-theme] .brand { white-space: normal; overflow-wrap: anywhere; height: auto; min-height: 86px; font-size: 16px; }
 [data-theme] .brand-mark { flex-shrink: 0; }

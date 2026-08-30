@@ -8,6 +8,8 @@ import { CompositeCarrierTrackingProvider } from './providers.js';
 export class TrackingSyncCoordinator {
   private pollTimer: NodeJS.Timeout | null = null;
   private running = false;
+  private result = { lastCheckedAt: null as string | null, checked: 0, updated: 0, failed: 0, message: null as string | null };
+  get summary() { return { ...this.result, running: this.running }; }
 
   constructor(
     private readonly repository: Repository,
@@ -28,26 +30,43 @@ export class TrackingSyncCoordinator {
     this.pollTimer = null;
   }
 
-  async syncAll(): Promise<void> {
-    if (this.running || !this.provider.configured) return;
+  async syncAll() {
+    if (!this.provider.configured) {
+      this.result.message='Carrier APIs are not connected yet. Email updates and tracking links remain available.';
+      return this.summary;
+    }
+    if (this.running || (this.result.lastCheckedAt && Date.now()-Date.parse(this.result.lastCheckedAt)<60_000)) return this.summary;
     this.running = true;
     try {
       const shipments = await this.repository.listActiveShipments(this.workspaceId, this.maxShipmentsPerSync);
-      for (const shipment of shipments) await this.syncOne(shipment);
+      let updated=0, failed=0;
+      for (const shipment of shipments) {
+        const result=await this.syncOne(shipment);
+        if (result==='updated') updated++;
+        if (result==='failed') failed++;
+      }
+      this.result={lastCheckedAt:new Date().toISOString(),checked:shipments.length,updated,failed,
+        message:failed ? 'Some carrier updates were unavailable. Email statuses are preserved; carrier access or credentials may need attention.' : null};
     } finally {
       this.running = false;
     }
+    return this.summary;
   }
 
   private async syncOne(shipment: ActiveShipmentRecord) {
     try {
       const snapshot = await this.provider.track(shipment.carrier, shipment.trackingNumber);
-      if (snapshot) await this.repository.updateShipmentFromCarrier(this.workspaceId, shipment, snapshot);
+      if (snapshot) {
+        await this.repository.updateShipmentFromCarrier(this.workspaceId, shipment, snapshot);
+        return 'updated';
+      }
+      return 'skipped';
     } catch (error) {
       // Keep this log deliberately small: never include carrier credentials or
       // a full API response. The next polling pass retries the shipment.
       const reason = error instanceof Error ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 120) : 'provider error';
       console.warn(`[tracking-sync] provider=${this.provider.name} tracking=${maskTracking(shipment.trackingNumber)} reason=${reason}`);
+      return 'failed';
     }
   }
 }

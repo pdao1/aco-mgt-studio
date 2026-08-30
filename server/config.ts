@@ -21,6 +21,9 @@ const schema = z.object({
   STRIPE_DUE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   SERVICE_SERIAL: z.string().min(12),
   SUPER_ADMIN_SERIAL: optionalSecret,
+  DISCORD_CLIENT_ID: optionalSecret,
+  DISCORD_CLIENT_SECRET: optionalSecret,
+  TRACKING_ENVIRONMENT: z.enum(['production', 'sandbox']).default('production'),
   SMTP_HOST: optionalSecret,
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
   SMTP_SECURE: booleanFromEnv.default(false),
@@ -34,8 +37,8 @@ const schema = z.object({
   OPENAI_KEY: optionalSecret,
   OPENAI_MODEL: z.string().trim().min(1).max(120).default('gpt-5-nano'),
   OPENAI_MAX_REVIEWS_PER_SYNC: z.coerce.number().int().min(0).max(100).default(25),
-  // Optional carrier API credentials. Each carrier offers a no-cost developer
-  // tier, but all three require the operator to create an account and keys.
+  // Optional server-side carrier keys. Production access and fees depend on
+  // the carrier agreement; USPS third-party tracking requires authorization.
   USPS_CLIENT_ID: optionalSecret,
   USPS_CLIENT_SECRET: optionalSecret,
   UPS_CLIENT_ID: optionalSecret,
@@ -69,6 +72,9 @@ export type AppConfig = {
   stripeDueDays: number;
   serviceSerial: string;
   superAdminSerial: string | null;
+  discordClientId: string | null;
+  discordClientSecret: string | null;
+  trackingEnvironment: 'production' | 'sandbox';
   smtpHost: string | null;
   smtpPort: number;
   smtpSecure: boolean;
@@ -120,6 +126,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     stripeDueDays: value.STRIPE_DUE_DAYS,
     serviceSerial: value.SERVICE_SERIAL,
     superAdminSerial: value.SUPER_ADMIN_SERIAL ?? null,
+    discordClientId: value.DISCORD_CLIENT_ID ?? null,
+    discordClientSecret: value.DISCORD_CLIENT_SECRET ?? null,
+    trackingEnvironment: value.TRACKING_ENVIRONMENT,
     smtpHost: value.SMTP_HOST ?? null,
     smtpPort: value.SMTP_PORT,
     smtpSecure: value.SMTP_SECURE,

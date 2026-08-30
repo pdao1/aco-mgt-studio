@@ -15,13 +15,15 @@ export async function runMigrations(databaseUrl: string, production = false) {
   });
   const client = await pool.connect();
   try {
+    // Multiple product processes can start together against the same database.
+    await client.query('SELECT pg_advisory_lock(731240190)');
     await client.query(`
       CREATE TABLE IF NOT EXISTS app_migrations (
         name text PRIMARY KEY,
         applied_at timestamptz NOT NULL DEFAULT now()
       )
     `);
-    const migrations = ['001_initial', '002_fees_portal', '003_billing_overrides', '004_service_fee_tenancy', '005_beta_access_settings', '006_cancellation_matching', '007_order_items', '008_pending_order_status', '009_workspace_identity'];
+    const migrations = ['001_initial', '002_fees_portal', '003_billing_overrides', '004_service_fee_tenancy', '005_beta_access_settings', '006_cancellation_matching', '007_order_items', '008_pending_order_status', '009_workspace_identity', '010_solo_buyers'];
     for (const name of migrations) {
       const existing = await client.query('SELECT 1 FROM app_migrations WHERE name = $1', [name]);
       if (existing.rowCount !== 0) continue;
@@ -35,6 +37,7 @@ export async function runMigrations(databaseUrl: string, production = false) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
   } finally {
+    await client.query('SELECT pg_advisory_unlock(731240190)').catch(() => undefined);
     client.release();
     await pool.end();
   }

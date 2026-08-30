@@ -43,6 +43,7 @@ export class UspsTrackingProvider implements CarrierTrackingProvider {
       this.clientId!,
       this.clientSecret!,
       false,
+      true,
     ));
     const response = await fetchWithTimeout(
       `${this.baseUrl}/tracking/v3/tracking/${encodeURIComponent(trackingNumber)}?expand=summary`,
@@ -116,7 +117,9 @@ export class UpsTrackingProvider implements CarrierTrackingProvider {
         ['trackResponse', 'shipment', '0', 'package', '0', 'deliveryDate', '0', 'date'],
         ['shipment', '0', 'package', '0', 'deliveryDate', '0', 'date'],
       ])),
-      deliveredAt: status === 'delivered' ? new Date() : null,
+      deliveredAt: status === 'delivered' ? parseDate(firstValue(body, [
+        ['trackResponse', 'shipment', '0', 'package', '0', 'activity', '0', 'date'],
+      ])) : null,
       trackingUrl: `https://www.ups.com/track?tracknum=${encodeURIComponent(trackingNumber)}`,
     };
   }
@@ -168,13 +171,10 @@ export class FedexTrackingProvider implements CarrierTrackingProvider {
       carrier: this.name,
       trackingNumber,
       status,
-      expectedDelivery: parseDate(firstValue(body, [
+      expectedDelivery: fedexDate(body, ['ESTIMATED_DELIVERY', 'COMMITMENT']) ?? parseDate(firstValue(body, [
         ['output', 'completeTrackResults', '0', 'trackResults', '0', 'estimatedDeliveryTimeWindow', 'window', 'begins'],
-        ['output', 'completeTrackResults', '0', 'trackResults', '0', 'dateAndTimes', '0', 'dateTime'],
       ])),
-      deliveredAt: status === 'delivered' ? parseDate(firstValue(body, [
-        ['output', 'completeTrackResults', '0', 'trackResults', '0', 'dateAndTimes', '0', 'dateTime'],
-      ])) ?? new Date() : null,
+      deliveredAt: status === 'delivered' ? fedexDate(body, ['ACTUAL_DELIVERY']) : null,
       trackingUrl: `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`,
     };
   }
@@ -192,6 +192,10 @@ export class CompositeCarrierTrackingProvider {
     return Object.values(this.providers).some((provider) => provider.configured);
   }
 
+  availability() {
+    return Object.values(this.providers).map(provider => ({name:provider.name,configured:provider.configured}));
+  }
+
   async track(carrier: string | null, trackingNumber: string): Promise<TrackingSnapshot | null> {
     const normalizedCarrier = carrier?.trim().toLowerCase() ?? '';
     const direct = this.providers[normalizedCarrier];
@@ -205,13 +209,16 @@ export class CompositeCarrierTrackingProvider {
 class OAuthTokenCache {
   private accessToken: string | null = null;
   private expiresAt = 0;
+  private pending: Promise<string> | null = null;
 
   async get(load: () => Promise<{ token: string; expiresIn: number }>): Promise<string> {
     if (this.accessToken && Date.now() < this.expiresAt) return this.accessToken;
-    const next = await load();
-    this.accessToken = next.token;
-    this.expiresAt = Date.now() + Math.max(30, next.expiresIn - 60) * 1000;
-    return next.token;
+    if (!this.pending) this.pending = load().then(next => {
+      this.accessToken = next.token;
+      this.expiresAt = Date.now() + Math.max(1, next.expiresIn - 60) * 1000;
+      return next.token;
+    }).finally(() => { this.pending = null; });
+    return this.pending;
   }
 }
 
@@ -220,6 +227,7 @@ async function requestOAuthToken(
   clientId: string,
   clientSecret: string,
   basicAuth: boolean,
+  jsonBody = false,
 ): Promise<{ token: string; expiresIn: number }> {
   const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' };
   const body = new URLSearchParams({ grant_type: 'client_credentials' });
@@ -228,7 +236,8 @@ async function requestOAuthToken(
     body.set('client_id', clientId);
     body.set('client_secret', clientSecret);
   }
-  const response = await fetchWithTimeout(url, { method: 'POST', headers, body: body.toString() });
+  if (jsonBody) headers['content-type']='application/json';
+  const response = await fetchWithTimeout(url, { method: 'POST', headers, body: jsonBody ? JSON.stringify(Object.fromEntries(body)) : body.toString() });
   const payload = await readJson(response) as OAuthTokenResponse;
   if (typeof payload.access_token !== 'string' || payload.access_token.length < 10) throw new Error('carrier OAuth returned no access token');
   const expiresIn = typeof payload.expires_in === 'number' ? payload.expires_in : Number(payload.expires_in) || 900;
@@ -236,13 +245,8 @@ async function requestOAuthToken(
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
+  // The deadline includes reading the body, not just receiving HTTP headers.
+  return fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -276,11 +280,27 @@ function firstString(value: unknown, paths: string[][]): string | null {
 export function normalizeCarrierStatus(value: string | null): ParsedOrderStatus | null {
   if (!value) return null;
   const normalized = value.toLowerCase();
+  if (['dl', 'd'].includes(normalized)) return 'delivered';
+  if (['it', 'ot', 'od', 'i'].includes(normalized)) return 'shipped';
+  if (['oc', 'm'].includes(normalized)) return 'pending';
+  if (['ca', 'cd'].includes(normalized)) return 'cancelled';
+  if (['de', 'dex'].includes(normalized) || /not\s+delivered/.test(normalized)) return 'processing';
   if (/exception|failure|failed|held|delay|attempted|address\s+correction/.test(normalized)) return 'processing';
-  if (/deliver|picked\s*up\s*by\s*recipient|proof\s+of\s+delivery/.test(normalized)) return 'delivered';
   if (/cancel|void|return(?:ed)?\s+to\s+sender|undeliverable/.test(normalized)) return 'cancelled';
-  if (/transit|shipped|out\s+for\s+delivery|tendered|accepted|pickup|label\s+created|manifest/.test(normalized)) return 'shipped';
+  if (/\bdelivered\b|picked\s*up\s*by\s*recipient|proof\s+of\s+delivery/.test(normalized)) return 'delivered';
+  if (/label\s+created|pre[- ]?shipment|awaiting\s+(?:item|shipment)/.test(normalized)) return 'pending';
+  if (/transit|shipped|out\s+for\s+delivery|on\s+.*delivery|on\s+the\s+way|moving\s+through|tendered|accepted|pickup|manifest/.test(normalized)) return 'shipped';
   if (/pending|pre[- ]?shipment|created|unknown|not\s+yet/.test(normalized)) return 'pending';
+  return null;
+}
+
+function fedexDate(body: unknown, types: string[]): Date | null {
+  const dates=firstValue(body,[['output','completeTrackResults','0','trackResults','0','dateAndTimes']]);
+  if (!Array.isArray(dates)) return null;
+  for (const type of types) {
+    const entry=dates.find(value=>value && typeof value==='object' && value.type===type);
+    if (entry) return parseDate(entry.dateTime);
+  }
   return null;
 }
 

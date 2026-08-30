@@ -22,6 +22,10 @@ services:
         sync: false
       - key: SUPER_ADMIN_SERIAL
         sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
@@ -52,6 +56,8 @@ services:
         value: "25"
       - key: USPS_CLIENT_ID
         sync: false
+      - key: TRACKING_ENVIRONMENT
+        value: production
       - key: USPS_CLIENT_SECRET
         sync: false
       - key: UPS_CLIENT_ID
