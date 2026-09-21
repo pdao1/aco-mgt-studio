@@ -33,6 +33,11 @@ export class SoloRepository {
       await client.query(`INSERT INTO solo_accounts(id, workspace_id, handle, discord_id, display_name, serial_hash, access_expires_at, mailbox_limit)
         VALUES ($1,$2,$3,$4,$5,$6,now()+($7 * interval '1 day'),$8)`,
       [id, workspaceId, input.handle, input.discordId, input.displayName, serialHash(serial), input.days, input.mailboxLimit]);
+      if (input.discordId) {
+        await client.query(`INSERT INTO discord_identities(discord_id,username,default_workspace_id) VALUES($1,$2,$3)
+          ON CONFLICT(discord_id) DO UPDATE SET default_workspace_id=COALESCE(discord_identities.default_workspace_id,EXCLUDED.default_workspace_id)`, [input.discordId,input.handle,workspaceId]);
+        await client.query('INSERT INTO discord_bindings(workspace_id,discord_id) VALUES($1,$2)',[workspaceId,input.discordId]);
+      }
       await client.query('COMMIT');
       return { id, serial, path: `/customer/${input.handle}` };
     } catch (error) { await client.query('ROLLBACK'); throw error; }
@@ -42,7 +47,7 @@ export class SoloRepository {
   private async find(field: 'id' | 'serial_hash' | 'discord_id', value: string): Promise<SoloAccount | null> {
     const result = await this.core.pool.query<AccountRow>(`SELECT ${columns} FROM solo_accounts a
       JOIN workspaces w ON w.id = a.workspace_id
-      WHERE a.${field} = $1 AND a.access_expires_at > now() AND w.status = 'active' AND w.product_type = 'solo'`, [value]);
+      WHERE a.${field} = $1 AND a.access_expires_at > now() AND workspace_has_access(w.id) AND w.product_type = 'solo'`, [value]);
     return result.rows[0] ? map(result.rows[0]) : null;
   }
   byId(id: string) { return this.find('id', id); }

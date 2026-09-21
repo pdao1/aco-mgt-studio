@@ -1,51 +1,123 @@
-# Solo Buyer service
+# Customer access and Solo Buyer service
 
-Solo Buyers and ACO companies use separate sign-in flows, sessions, and APIs. Solo Buyers connect their own Gmail inboxes and see combined or per-inbox orders, purchase totals by currency, items, tracking, and delivery timelines. There are no invoices, service-fee controls, customer management, or sharing links in this product.
+ACO Studio uses one Discord-first identity flow for both products. A user signs
+in with Discord, then either links an existing Solo serial or ACO workspace
+credentials, or lets a verified Whop purchase provision access automatically.
+The browser receives a signed, HttpOnly cookie; no serial, password, or Discord
+OAuth token is stored in the browser.
 
-## Issue individual access
+## Production setup
 
-After deploying/migrating, run this command from the application directory with the server environment configured:
+Set these Render environment variables:
 
-```powershell
+```text
+APP_ORIGIN=https://aco-studio.onrender.com
+DISCORD_CLIENT_ID=<Discord application client ID>
+DISCORD_CLIENT_SECRET=<Discord application client secret>
+DISCORD_REDIRECT_URI=https://aco-studio.onrender.com/oauth/discord
+WHOP_API_KEY=<Whop API key>
+WHOP_WEBHOOK_SECRET=<Whop webhook signing secret, including the ws_ prefix>
+WHOP_ACCOUNT_ID=biz_1HjUYXgisSyf7z
+WHOP_SOLO_PRODUCT_ID=prod_3mqbBwetOGv5G
+WHOP_ACO_PRODUCT_ID=prod_SiiEh8TDBF2nk
+```
+
+The account and product IDs are public identifiers and are already in
+`render.yaml`. Keep the Discord secret, Whop API key, and webhook secret as
+Render secret values. Do not put them in Vite variables or commit them.
+
+## Discord Developer Portal
+
+Create or open the Discord application, then add this exact OAuth2 redirect:
+
+```text
+https://aco-studio.onrender.com/oauth/discord
+```
+
+Select only the `identify` OAuth scope. This application uses Discord to
+verify the user's immutable Discord ID and username. It does not need the
+`email`, `guilds`, `guilds.join`, `connections`, `bot`, or
+`applications.commands` scopes. A bot user and bot token are not required for
+website authentication.
+
+The implementation uses the authorization-code flow, a signed short-lived
+state cookie, and a server-side code exchange. See Discord's
+[OAuth2 documentation](https://docs.discord.com/developers/topics/oauth2).
+
+## Whop setup
+
+In Whop, configure the webhook endpoint:
+
+```text
+https://aco-studio.onrender.com/api/whop/webhook
+```
+
+Send the membership and payment events needed for access reconciliation:
+
+- `membership.activated`
+- `membership.deactivated`
+- `membership.cancel_at_period_end_changed`
+- `payment.succeeded`
+- `payment.failed`
+
+The server pins the Whop webhook contract to API version `v1` and API version
+date `2026-09-15`. It validates the raw-body HMAC signature, checks the Whop
+account ID, deduplicates event IDs, and fetches the current membership before
+changing access. Configure Whop's Connected Accounts so buyers can link Discord
+to their Whop account. A purchase without a linked Discord account is recorded
+but does not grant an application login.
+
+The server retrieves current memberships and user profiles from Whop with the
+API key. It checks product ID, seller account, membership status, current
+period, and the buyer's primary Discord connection before granting access.
+
+## What happens after a purchase
+
+1. The user signs in at `/` or `/login` with Discord.
+2. The webhook is durably queued and the worker verifies the current Whop
+   membership.
+3. A valid Solo purchase creates a private Solo service, mailbox allowance,
+   and default `/customer/...` route. A valid ACO purchase creates a private
+   workspace and default `/app/workspaces/...` route.
+4. The user chooses **Check purchase access**. The browser remembers the linked
+   Discord identity for up to 30 days, capped by Solo access expiry.
+5. Future visits to `/` detect the signed cookie and forward the user to the
+   stored dashboard path.
+
+Whop access is checked again every 15 minutes and uses a one-hour fail-closed
+lease. Cancellation or failed reconciliation therefore removes application
+access without deleting the user's mailbox or order history. Manual services
+remain manually controlled until they are explicitly linked to a Whop
+membership.
+
+## Existing services
+
+An existing Solo customer selects **Solo Buyer** and enters the serial once.
+An existing ACO operator selects **ACO workspace** and enters the workspace ID
+and password once. The service is then bound to that Discord ID. A service can
+only be linked to one Discord identity, while a Discord identity can own both a
+Solo service and an ACO workspace.
+
+Individual Solo serials are still created from the Render service shell:
+
+```text
 npm run solo:provision -- --handle buyer.name --name "Buyer Name" --days 30 --mailbox-limit 5
 ```
 
-The command prints `/customer/buyer.name` and a unique `solo_…` serial once. Deliver it privately to that buyer: it is a login credential. Only its SHA-256 hash is stored. The existing ACO `SERVICE_SERIAL` never unlocks Solo Buyer accounts. This command is service-owner tooling, not a public signup endpoint.
+The command prints the serial once; only its hash is stored. Rotate a lost
+serial with `--rotate`, which invalidates existing Solo sessions. See the
+`solo:provision` command help for the remaining owner-only options.
 
-Open `/customer`, enter the individual serial, and connect Gmail inboxes. Each inbox requires its own Gmail app password, with the existing read-only IMAP verification and encryption. The first sync starts automatically. Current mailbox support is Gmail; Discord sign-in does not grant email access.
+## Security and operating notes
 
-`--days` sets the access duration and `--mailbox-limit` sets a separate account limit. Expired or suspended accounts cannot sign in, call personal APIs, or enter scheduled polling. All personal data is retained on expiry. There is no automatic paid checkout or subscription webhook yet; connect a verified billing entitlement flow to provisioning before offering unattended paid signup.
-
-Replace a lost or compromised serial:
-
-```powershell
-npm run solo:provision -- --handle buyer.name --rotate
-```
-
-This invalidates the previous serial and all existing Solo sessions. Use the current handle after Discord linking.
-
-Extend purchased access with `npm run solo:provision -- --handle buyer.name --renew --days 30`. This adds days to active access or starts from now for expired access; it does not change the serial or override a suspended tenant.
-
-## Discord sign-in
-
-1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications).
-2. In OAuth2, obtain the application's client ID and client secret. Set `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` on the server, never in frontend/Vite variables. A bot token is not used.
-3. Add an exact OAuth2 redirect URL: `https://YOUR-DOMAIN/api/solo/auth/discord/callback`. It must match `APP_ORIGIN` plus this path. Local development uses `http://127.0.0.1:5173/api/solo/auth/discord/callback`.
-4. Restart the server. Buyers can sign in with their serial, choose **Connect Discord**, and authorize the basic `identify` scope. Future visits can use **Continue with Discord** without the serial.
-
-Alternatively, pre-link a paid buyer at provisioning by appending `--discord-id 123456789012345678` using their verified Discord user ID. Discord login alone never creates an unentitled account.
-
-The route follows the verified Discord username, such as `/customer/buyer.name`. Before linking, it uses the reserved handle supplied by the service owner. If a username is already reserved by another personal account, the existing handle is retained. Authorization always uses the immutable account ID and verified Discord ID, never the username in the URL. Visiting another handle cannot expose that person's data: a signed-in user returns to their own dashboard.
-
-The implementation follows Discord's [authorization code flow](https://docs.discord.com/developers/topics/oauth2), validates a short-lived signed state cookie, and discards OAuth tokens after fetching the verified user identity. Serial and Discord login both require active personal access.
-
-## Shared core, separate product boundaries
-
-- A Solo account owns an internal tenant record marked `product_type='solo'`; the UI and API do not expose workspace routes or ACO branding/settings. This preserves the existing PostgreSQL row-level isolation without copying the ingestion system.
-- `/api/solo/*` uses `solo_session`; ACO sessions and credentials cannot access it. Solo tenants are excluded from ACO password lookup. All personal mailbox/order queries use the account from the session, not a client-supplied tenant ID.
-- Personal dashboard responses omit fee amounts, fee rules, invoice IDs, and billing status. Currency totals never combine different currencies or treat unknown totals as zero purchases. Summaries and filters include all parsed personal orders; the table shows 50 matching orders per page, without the ACO dashboard's 2,000-order cutoff.
-- Mailbox caps are checked while holding the tenant row lock, preventing simultaneous connections from exceeding the account limit.
-- Gmail and carrier jobs reuse the existing parsing, deterministic order updates, encrypted credential storage, and shipment history.
-- Carrier keys are service-level secrets shared by the trusted server. See [tracking setup](tracking-setup.md) for approvals, test environments, and current limitations.
-
-Migration `010_solo_buyers` adds personal accounts and defaults all existing tenants to the ACO product. The trusted server must exclusively hold database credentials; the account/tenant authentication directory is not a browser-accessible database API. Production scaling still requires measured queue capacity and provider quotas, rather than assuming hundreds of simultaneous inbox jobs are safe.
+- Cookies are signed with `SESSION_SECRET`, HttpOnly, Secure in production,
+  and SameSite Strict. OAuth state uses a separate short-lived SameSite Lax
+  cookie for the provider redirect.
+- Access is checked server-side on every protected request; changing a URL or
+  dashboard path cannot switch tenants.
+- The webhook returns a retryable 5xx on database/provider failures and a 4xx
+  for malformed or unsigned requests. Whop retries are safe because event IDs
+  and membership provisioning are idempotent.
+- The current worker processes up to 10 queued/recheck jobs per five seconds.
+  Before a large launch, move reconciliation to a dedicated queue/worker or
+  increase capacity with metrics and provider quota review.

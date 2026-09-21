@@ -26,6 +26,20 @@ services:
         sync: false
       - key: DISCORD_CLIENT_SECRET
         sync: false
+      - key: DISCORD_REDIRECT_URI
+        value: https://aco-studio.onrender.com/oauth/discord
+      - key: WHOP_API_KEY
+        sync: false
+      - key: WHOP_WEBHOOK_SECRET
+        sync: false
+      - key: WHOP_ACCOUNT_ID
+        value: biz_1HjUYXgisSyf7z
+      - key: WHOP_SOLO_PRODUCT_ID
+        value: prod_3mqbBwetOGv5G
+      - key: WHOP_ACO_PRODUCT_ID
+        value: prod_SiiEh8TDBF2nk
+      - key: WHOP_SOLO_MAILBOX_LIMIT
+        value: "5"
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET

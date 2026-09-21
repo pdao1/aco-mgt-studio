@@ -96,10 +96,17 @@ drafts remain local and no fake payment state is shown.
 
 Customer service-fee invoices and ACO platform subscriptions are separate
 billing domains. Stripe handles an ACO operator's downstream customer fee
-invoices. A future Whop adapter will verify subscription events and provision
-one isolated workspace/node group for each subscribed ACO business.
+invoices. Whop handles paid access for the configured Solo and ACO products.
+See [customer access and Whop setup](docs/solo-buyers.md) for the Discord
+scopes, callback URL, product IDs, webhook events, and Render variables.
 
-ACO workspace registration is currently protected by the platform service serial, not subscription entitlements. Each company chooses a unique workspace ID and password at `/app`; its stable sign-in link is `/app/workspaces/:slug`. Settings and credentials are tenant-scoped. Mailbox and carrier polling visit active accounts (excluding expired Solo Buyer access), and Stripe events route using workspace metadata. Solo Buyer access is provisioned separately by the service owner with `npm run solo:provision`; a platform ACO serial cannot unlock a personal account. Automatic checkout/subscription provisioning is not implemented.
+Users sign in with Discord first. Existing users link a Solo serial or ACO
+workspace credentials once; verified Whop purchases provision the corresponding
+isolated service automatically after the buyer links Discord in Whop. ACO
+workspace links are `/app/workspaces/:slug`; Solo links are `/customer/...`.
+The server checks the signed identity and the current service entitlement on
+every protected request. Cancellation suspends access without deleting tenant
+data.
 
 For existing installations only, `OPERATOR_PASSWORD`, `WORKSPACE_SLUG`, and `WORKSPACE_NAME` remain optional bootstrap inputs. The password is imported once as a salted hash. Subsequent restarts never reset a workspace's saved name, password, or status. Remove the legacy password from the environment after migration. Existing installations can sign in using workspace ID `default` (or their configured slug). Company name changes do not change the workspace ID or customer links. Changing the workspace password invalidates other operator sessions. Historical invoices without an issuer snapshot remain unbranded rather than being relabeled retroactively.
 

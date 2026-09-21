@@ -31,8 +31,9 @@ export function issueSession(
   secret: string,
   secure: boolean,
   sessionVersion = 0,
+  durationMs = SESSION_DURATION_MS,
 ) {
-  const payload: SessionPayload = { workspaceId, sessionVersion, expiresAt: Date.now() + SESSION_DURATION_MS };
+  const payload: SessionPayload = { workspaceId, sessionVersion, expiresAt: Date.now() + durationMs };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const signature = sign(encoded, secret);
   response.cookie(COOKIE_NAME, `${encoded}.${signature}`, {
@@ -40,7 +41,7 @@ export function issueSession(
     secure,
     sameSite: 'strict',
     path: '/',
-    maxAge: SESSION_DURATION_MS,
+    maxAge: durationMs,
   });
 }
 

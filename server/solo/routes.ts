@@ -12,6 +12,7 @@ import { THEME_IDS } from '../../src/lib/themes.js';
 import { SoloRepository, type SoloAccount } from './repository.js';
 import { SOLO_COOKIE, clearSoloSession, issueSoloSession, readValue, signValue, type SoloSession } from './session.js';
 import { exchangeDiscordCode } from './discord.js';
+import { clearDiscordSession } from '../auth/discord.js';
 
 declare global { namespace Express { interface Request { soloAccount?: SoloAccount } } }
 interface Dependencies {
@@ -34,16 +35,26 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
   }
   router.use((_request,response,next)=>{response.setHeader('Cache-Control','private, no-store');next();});
   router.get('/auth/options',(_request,response)=>response.json({discordAvailable:discordReady}));
+  router.get('/auth/session',async(request,response,next)=>{
+    try {
+      const account=await sessionAccount(request);
+      if (!account) {
+        if (request.cookies?.[SOLO_COOKIE]) clearSoloSession(response,secure);
+        response.json({authenticated:false});return;
+      }
+      response.json({authenticated:true,path:`/customer/${account.handle}`});
+    } catch(error){next(error);}
+  });
   router.post('/auth/serial',limiter,async(request,response,next)=>{
     const parsed=z.object({serial:z.string().trim().min(20).max(150)}).strict().safeParse(request.body);
     try {
       const account=parsed.success ? await accounts.bySerial(parsed.data.serial) : null;
       if (!account) {response.status(401).json({message:'That Solo Buyer serial is invalid, expired, or suspended.'});return;}
-      issueSoloSession(response,account.id,account.sessionVersion,config.sessionSecret,secure);
+      issueSoloSession(response,account.id,account.sessionVersion,config.sessionSecret,secure,account.accessExpiresAt);
       response.json({path:`/customer/${account.handle}`});
     } catch(error){next(error);}
   });
-  router.post('/auth/logout',(_request,response)=>{clearSoloSession(response,secure);response.json({ok:true});});
+  router.post('/auth/logout',(_request,response)=>{clearDiscordSession(response,secure);clearSoloSession(response,secure);response.json({ok:true});});
   router.get('/auth/discord',limiter,async(request,response,next)=>{
     if (!discordReady) {response.redirect('/customer?error=discord-unavailable');return;}
     try {
@@ -68,7 +79,7 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
         account=await accounts.linkDiscord(linking,user.id,user.username);
       } else if (account) account=await accounts.linkDiscord(account,user.id,user.username);
       if (!account) {response.redirect('/customer?error=solo-access-required');return;}
-      issueSoloSession(response,account.id,account.sessionVersion,config.sessionSecret,secure);
+      issueSoloSession(response,account.id,account.sessionVersion,config.sessionSecret,secure,account.accessExpiresAt);
       response.redirect(`/customer/${account.handle}`);
     } catch {response.redirect('/customer?error=discord-failed');}
   });
@@ -76,6 +87,7 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
     try {
       const account=await sessionAccount(request);
       if (!account) {response.status(401).json({message:'Sign in with Discord or your Solo Buyer product serial.'});return;}
+      if(request.discordWorkspaceId && request.discordWorkspaceId!==account.workspaceId){response.status(401).json({message:'Sign in again.'});return;}
       request.soloAccount=account;next();
     } catch(error){next(error);}
   });

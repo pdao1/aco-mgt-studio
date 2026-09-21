@@ -30,6 +30,8 @@ import {
 import { hashPassword, verifyPassword } from './security/password.js';
 import { THEME_IDS } from '../src/lib/themes.js';
 import { createSoloRouter } from './solo/routes.js';
+import { createDiscordAuth, clearDiscordSession } from './auth/discord.js';
+import { WhopService, WhopWebhookError } from './billing/whop.js';
 
 const config = loadConfig();
 await runMigrations(config.databaseUrl, config.nodeEnv === 'production');
@@ -93,6 +95,9 @@ const smtpNotifier = new SmtpNotifier({
 });
 
 const app = express();
+const discordAuth = createDiscordAuth(config, repository);
+const whop = new WhopService(config, repository);
+whop.start();
 if (config.nodeEnv === 'production') app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({
@@ -133,6 +138,17 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '
     response.status(500).json({ error: 'STRIPE_WEBHOOK_FAILED', message: 'The Stripe event will be retried.' });
   }
 });
+app.post('/api/whop/webhook', express.raw({ type:'application/json', limit:'256kb' }), async (request,response) => {
+  if(!whop.configured){response.status(503).json({message:'Whop is not configured.'});return;}
+  if(!Buffer.isBuffer(request.body)){response.status(400).json({message:'Raw JSON required.'});return;}
+  try {
+    await whop.receive(request.body,{'webhook-id':request.get('webhook-id'),'webhook-timestamp':request.get('webhook-timestamp'),'webhook-signature':request.get('webhook-signature')});
+    response.status(202).json({received:true});
+  } catch(error) {
+    // Database failures must be retried by Whop; malformed/unsigned requests are rejected.
+    response.status(error instanceof WhopWebhookError?400:503).json({message:'Webhook could not be accepted.'});
+  }
+});
 app.use(express.json({ limit: '32kb' }));
 app.use(cookieParser());
 app.use(enforceOrigin(config.appOrigin));
@@ -153,6 +169,15 @@ app.get('/api/health', async (_request, response) => {
   } catch {
     response.status(503).json({ ok: false });
   }
+});
+
+app.get(['/oauth/discord','/api/auth/discord/callback','/api/solo/auth/discord/callback'],discordAuth.callback);
+app.get('/api/solo/auth/discord',discordAuth.begin);
+app.use('/api/auth',discordAuth.router);
+// Once Discord is configured, legacy credential endpoints cannot bypass identity binding.
+app.post(['/api/access/activate','/api/auth/login','/api/auth/register','/api/solo/auth/serial'],(request,response,next)=>{
+  if(!discordAuth.enabled){next();return;}
+  response.status(409).json({error:'DISCORD_AUTH_REQUIRED',message:'Sign in with Discord at /login, then link your service.'});
 });
 
 const workspaceSlugSchema = z.string().trim().toLowerCase().min(1).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
@@ -204,6 +229,7 @@ app.post('/api/auth/register', requireServiceAccess(config.sessionSecret, config
 });
 
 app.post('/api/auth/logout', (_request, response) => {
+  clearDiscordSession(response,config.nodeEnv==='production');
   clearSession(response, config.nodeEnv === 'production');
   response.json({ ok: true });
 });
@@ -235,11 +261,15 @@ app.get('/api/public/portal/:token', async (request, response, next) => {
   }
 });
 
-app.use('/api/solo', createSoloRouter({config,repository,secretBox,trackingProvider:carrierTrackingProvider,coordinators:workspaceCoordinators}));
+app.use('/api/solo', (request,response,next)=>{
+  if(request.path.startsWith('/auth/')){next();return;}
+  return discordAuth.requireProduct('solo')(request,response,next);
+}, createSoloRouter({config,repository,secretBox,trackingProvider:carrierTrackingProvider,coordinators:workspaceCoordinators}));
 
-app.use('/api', requireServiceAccess(config.sessionSecret, config.serviceSerial), requireSession(config.sessionSecret));
+app.use('/api', discordAuth.requireProduct('aco'), requireServiceAccess(config.sessionSecret, config.serviceSerial), requireSession(config.sessionSecret));
 app.use('/api', async (request, response, next) => {
   try {
+    if(request.discordWorkspaceId && request.discordWorkspaceId!==request.workspaceId){response.status(401).json({message:'Sign in again.'});return;}
     const credentials = await repository.getCredentials(request.workspaceId!);
     if (!credentials || credentials.session_version !== request.sessionVersion) {
       clearSession(response, config.nodeEnv === 'production');
@@ -595,6 +625,7 @@ const server = app.listen(config.port, '0.0.0.0', () => {
 });
 
 const shutdown = async () => {
+  whop.stop();
   clearInterval(mailboxTimer);
   clearInterval(trackingTimer);
   server.close();

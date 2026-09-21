@@ -166,7 +166,7 @@ export class Repository {
   }
 
   async listActiveWorkspaceIds(): Promise<string[]> {
-    const result = await this.pool.query<{ id: string }>(`SELECT w.id FROM workspaces w WHERE w.status = 'active'
+    const result = await this.pool.query<{ id: string }>(`SELECT w.id FROM workspaces w WHERE workspace_has_access(w.id)
       AND (w.product_type = 'aco' OR EXISTS (SELECT 1 FROM solo_accounts a WHERE a.workspace_id=w.id AND a.access_expires_at>now()))`);
     return result.rows.map((row) => row.id);
   }
@@ -208,7 +208,7 @@ export class Repository {
       const result = await client.query<{ password_hash: string; session_version: number }>(`
         SELECT c.password_hash, c.session_version FROM workspace_credentials c
         JOIN workspaces w ON w.id = c.workspace_id
-        WHERE c.workspace_id = $1 AND w.status = 'active' AND w.product_type = 'aco'`, [workspaceId]);
+        WHERE c.workspace_id = $1 AND workspace_has_access(w.id) AND w.product_type = 'aco'`, [workspaceId]);
       return result.rows[0] ?? null;
     });
   }

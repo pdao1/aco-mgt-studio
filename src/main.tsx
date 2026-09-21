@@ -8,6 +8,7 @@ const CustomerPortalApp = lazy(() => import('./CustomerPortalApp'));
 const MarketingSite = lazy(() => import('./MarketingSite'));
 const SuperAdminView = lazy(() => import('./SuperAdminView'));
 const SoloBuyerApp = lazy(() => import('./solo/SoloBuyerApp'));
+const IdentityGate = lazy(() => import('./components/IdentityGate'));
 
 const portalPrefix = '/portal/';
 const isPortalRoute = window.location.pathname.startsWith(portalPrefix);
@@ -21,7 +22,7 @@ const isSoloRoute = window.location.pathname === '/customer' || window.location.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Suspense fallback={<main className="loading-screen">Loading…</main>}>
-    {isSoloRoute ? <SoloBuyerApp /> : isPortalRoute ? <CustomerPortalApp token={portalToken ?? ''} /> : isSuperAdminRoute ? <SuperAdminView /> : isAppRoute ? <App /> : <MarketingSite />}
+    {window.location.pathname === '/login' ? <IdentityGate/> : isSoloRoute ? <IdentityGate product="solo"><SoloBuyerApp /></IdentityGate> : isPortalRoute ? <CustomerPortalApp token={portalToken ?? ''} /> : isSuperAdminRoute ? <SuperAdminView /> : isAppRoute ? <IdentityGate product="aco"><App /></IdentityGate> : <MarketingSite />}
     </Suspense>
   </StrictMode>,
 );

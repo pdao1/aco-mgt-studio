@@ -254,6 +254,7 @@ export default function App() {
 
   const logout = async () => {
     await api.logout();
+    window.location.replace('/app');
     setData(null);
     setBilling({ invoices: [] });
     setNeedsLogin(true);

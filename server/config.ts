@@ -23,6 +23,13 @@ const schema = z.object({
   SUPER_ADMIN_SERIAL: optionalSecret,
   DISCORD_CLIENT_ID: optionalSecret,
   DISCORD_CLIENT_SECRET: optionalSecret,
+  DISCORD_REDIRECT_URI: z.preprocess(value => value === '' ? undefined : value, z.string().url().optional()),
+  WHOP_API_KEY: optionalSecret,
+  WHOP_WEBHOOK_SECRET: optionalSecret,
+  WHOP_ACCOUNT_ID: optionalSecret,
+  WHOP_SOLO_PRODUCT_ID: optionalSecret,
+  WHOP_ACO_PRODUCT_ID: optionalSecret,
+  WHOP_SOLO_MAILBOX_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
   TRACKING_ENVIRONMENT: z.enum(['production', 'sandbox']).default('production'),
   SMTP_HOST: optionalSecret,
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
@@ -74,6 +81,13 @@ export type AppConfig = {
   superAdminSerial: string | null;
   discordClientId: string | null;
   discordClientSecret: string | null;
+  discordRedirectUri: string;
+  whopApiKey: string | null;
+  whopWebhookSecret: string | null;
+  whopAccountId: string | null;
+  whopSoloProductId: string | null;
+  whopAcoProductId: string | null;
+  whopSoloMailboxLimit: number;
   trackingEnvironment: 'production' | 'sandbox';
   smtpHost: string | null;
   smtpPort: number;
@@ -112,6 +126,12 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw new Error(`Missing or invalid server configuration: ${fields}`);
   }
   const value = parsed.data;
+  const discordRedirectUri = value.DISCORD_REDIRECT_URI ?? `${value.APP_ORIGIN.replace(/\/$/, '')}/oauth/discord`;
+  const callback = new URL(discordRedirectUri);
+  if (callback.origin !== new URL(value.APP_ORIGIN).origin || !['/oauth/discord', '/api/auth/discord/callback', '/api/solo/auth/discord/callback'].includes(callback.pathname) || callback.search || callback.hash) {
+    throw new Error('DISCORD_REDIRECT_URI must use APP_ORIGIN and a supported Discord callback path.');
+  }
+  if (value.WHOP_SOLO_PRODUCT_ID && value.WHOP_SOLO_PRODUCT_ID === value.WHOP_ACO_PRODUCT_ID) throw new Error('Whop Solo and ACO product IDs must be different.');
   if (value.NODE_ENV === 'production' && !value.APP_ORIGIN.startsWith('https://')) {
     throw new Error('APP_ORIGIN must use HTTPS in production so customer portal links are secure.');
   }
@@ -128,6 +148,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     superAdminSerial: value.SUPER_ADMIN_SERIAL ?? null,
     discordClientId: value.DISCORD_CLIENT_ID ?? null,
     discordClientSecret: value.DISCORD_CLIENT_SECRET ?? null,
+    discordRedirectUri,
+    whopApiKey: value.WHOP_API_KEY ?? null,
+    whopWebhookSecret: value.WHOP_WEBHOOK_SECRET ?? null,
+    whopAccountId: value.WHOP_ACCOUNT_ID ?? null,
+    whopSoloProductId: value.WHOP_SOLO_PRODUCT_ID ?? null,
+    whopAcoProductId: value.WHOP_ACO_PRODUCT_ID ?? null,
+    whopSoloMailboxLimit: value.WHOP_SOLO_MAILBOX_LIMIT,
     trackingEnvironment: value.TRACKING_ENVIRONMENT,
     smtpHost: value.SMTP_HOST ?? null,
     smtpPort: value.SMTP_PORT,

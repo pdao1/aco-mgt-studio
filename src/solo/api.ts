@@ -2,6 +2,7 @@ import { request } from '../lib/api';
 import type { ConnectCustomerInput } from '../types';
 import type { SoloDashboard, TrackingSummary } from './types';
 export const soloApi = {
+  session:(signal?:AbortSignal)=>request<{authenticated:false}|{authenticated:true;path:string}>('/api/solo/auth/session',{signal,cache:'no-store'}),
   options:()=>request<{discordAvailable:boolean}>('/api/solo/auth/options'),
   login:(serial:string)=>request<{path:string}>('/api/solo/auth/serial',{method:'POST',body:JSON.stringify({serial})}),
   logout:()=>request('/api/solo/auth/logout',{method:'POST'}),

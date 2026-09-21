@@ -54,7 +54,7 @@ export default function SoloBuyerApp() {
   };
   const logout=async()=>{
     ++requestSequence.current;setData(null);setLoading(true);
-    try{await soloApi.logout();setLogin(true);window.history.replaceState(null,'','/customer');}
+    try{await soloApi.logout();window.location.replace('/customer');}
     catch{await refresh();setError('Sign out failed. Please try again.');}
     finally{setLoading(false);}
   };

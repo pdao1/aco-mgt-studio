@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Response } from 'express';
 
 export const SOLO_COOKIE = 'solo_session';
+export const SOLO_SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 export interface SoloSession { accountId: string; version: number; expiresAt: number }
 export function signValue(value: object, purpose: string, secret: string): string {
   const encoded = Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -20,10 +21,14 @@ export function readValue<T extends { expiresAt: number }>(raw: unknown, purpose
     return typeof value.expiresAt === 'number' && value.expiresAt > Date.now() ? value : null;
   } catch { return null; }
 }
-export function issueSoloSession(response: Response, accountId: string, version: number, secret: string, secure: boolean) {
-  const duration = 12 * 60 * 60 * 1000;
-  response.cookie(SOLO_COOKIE, signValue({accountId, version, expiresAt: Date.now()+duration}, 'solo-session', secret), {
-    httpOnly:true, secure, sameSite:'strict', path:'/', maxAge:duration,
+export function issueSoloSession(response: Response, accountId: string, version: number, secret: string, secure: boolean, accessExpiresAt: string) {
+  const now = Date.now();
+  const expiresAt = Math.min(now + SOLO_SESSION_DURATION_MS, Date.parse(accessExpiresAt));
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) throw new Error('Solo Buyer access has expired.');
+  // Remember this browser without storing its serial or Discord OAuth tokens.
+  // Every authenticated request also checks current access and session version.
+  response.cookie(SOLO_COOKIE, signValue({accountId, version, expiresAt}, 'solo-session', secret), {
+    httpOnly:true, secure, sameSite:'strict', path:'/', maxAge:expiresAt-now,
   });
 }
 export function clearSoloSession(response: Response, secure: boolean) {

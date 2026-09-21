@@ -141,21 +141,14 @@ endpoint for invoice events.
 
 ## ACO subscriptions and node-group provisioning
 
-Platform subscriptions are a separate billing domain. The intended mapping is
-one subscribed ACO owner → one workspace/node group → that ACO's customers,
-mailboxes, orders, overrides, and fee invoices. A provider-neutral entitlement
-record identifies the subscription provider and external subscription; a
-membership associates a verified external user with the workspace; provider
-event IDs are deduplicated before state changes.
-
-The future Whop adapter must verify the raw webhook signature against current
-primary Whop documentation, translate the event into a versioned provisioning
-command, and perform one transaction that deduplicates the event, upserts the
-workspace/entitlement/membership, and returns the same workspace on retries.
-Cancellation suspends access and polling without deleting tenant data. The
-current password login and single-workspace IMAP coordinator remain local-mode
-boundaries; they are not represented as Whop authentication or multi-tenant
-scheduling until those adapters exist.
+Whop is the paid-access provider for the configured Solo and ACO products. A
+verified purchase maps one Discord identity to one isolated service, and a
+Discord identity may own one service of each product type. Webhook event IDs
+are deduplicated, current membership state is fetched from Whop before access
+changes, and cancellation suspends access without deleting tenant data. The
+reconciliation worker uses a finite fail-closed lease so missed webhooks do
+not grant indefinite access. See `docs/solo-buyers.md` for provider setup and
+the exact current API contract.
 
 ## OpenAI/AI decision record
 

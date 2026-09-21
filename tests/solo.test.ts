@@ -1,12 +1,38 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { signValue, readValue } from '../server/solo/session.js';
+import { signValue, readValue, issueSoloSession, SOLO_SESSION_DURATION_MS } from '../server/solo/session.js';
+import type { Response as ExpressResponse } from 'express';
 import { serialHash } from '../server/solo/repository.js';
 import { exchangeDiscordCode } from '../server/solo/discord.js';
 import { summarizePurchases } from '../src/solo/order-summary.js';
 import type { SoloOrder } from '../src/solo/types.js';
 
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();});
 describe('Solo Buyer identity and purchase totals',()=>{
+  it('remembers a browser for 30 days with a protected cookie and no login credentials',()=>{
+    vi.useFakeTimers();vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
+    const cookie=vi.fn(), response={cookie} as unknown as ExpressResponse;
+    issueSoloSession(response,'account-id',4,'test-secret',true,'2027-01-01T00:00:00Z');
+    const [name,value,options]=cookie.mock.calls[0];
+    expect(name).toBe('solo_session');
+    expect(options).toEqual({httpOnly:true,secure:true,sameSite:'strict',path:'/',maxAge:SOLO_SESSION_DURATION_MS});
+    expect(readValue(value,'solo-session','test-secret')).toEqual({accountId:'account-id',version:4,expiresAt:Date.now()+SOLO_SESSION_DURATION_MS});
+    vi.advanceTimersByTime(13*60*60*1000);
+    expect(readValue(value,'solo-session','test-secret')).not.toBeNull();
+    vi.advanceTimersByTime(SOLO_SESSION_DURATION_MS);
+    expect(readValue(value,'solo-session','test-secret')).toBeNull();
+  });
+  it('caps remembered access at the plan expiry and refuses expired or invalid access',()=>{
+    vi.useFakeTimers();vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
+    const cookie=vi.fn(), response={cookie} as unknown as ExpressResponse;
+    const expiry=new Date(Date.now()+2*86400000).toISOString();
+    issueSoloSession(response,'account-id',0,'test-secret',false,expiry);
+    expect(cookie.mock.calls[0][2].maxAge).toBe(2*86400000);
+    expect(readValue(cookie.mock.calls[0][1],'solo-session','test-secret')?.expiresAt).toBe(Date.parse(expiry));
+    for(const invalid of ['invalid-date',new Date(Date.now()).toISOString()]) {
+      expect(()=>issueSoloSession(response,'account-id',0,'test-secret',true,invalid)).toThrow('expired');
+    }
+    expect(cookie).toHaveBeenCalledTimes(1);
+  });
   it('rejects tampered, expired, and differently purposed sessions',()=>{
     const secret='test-session-secret', payload={expiresAt:Date.now()+10000,accountId:'test-account'};
     const signed=signValue(payload,'solo-session',secret);

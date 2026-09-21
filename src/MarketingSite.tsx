@@ -1,7 +1,33 @@
+import { useEffect, useState } from 'react';
 import { ArrowRight, Boxes, CheckCircle2, Mail, ShieldCheck, Sparkles } from 'lucide-react';
+import { soloApi } from './solo/api';
+import { identityApi } from './lib/identity';
 import './products.css';
 
 export default function MarketingSite() {
+  const [checkingSession, setCheckingSession] = useState(window.location.pathname === '/');
+  useEffect(() => {
+    if (window.location.pathname !== '/') return;
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5_000);
+    void identityApi.session(controller.signal).then(async(session) => {
+      if (!active) return;
+      if (session.status==='linked') window.location.replace(session.path);
+      else if(session.status==='unlinked') window.location.replace('/login');
+      else if(!session.discordAvailable){
+        const legacy=await soloApi.session(controller.signal);
+        if(active&&legacy.authenticated)window.location.replace(legacy.path);
+      }
+    }).catch(() => {
+      // Keep the public homepage available if the session check fails.
+    }).finally(() => {
+      window.clearTimeout(timeout);
+      if (active) setCheckingSession(false);
+    });
+    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+  }, []);
+  if (checkingSession) return <main className="loading-screen">Checking your sign-in…</main>;
   return (
     <main className="marketing-shell">
       <header className="marketing-header">
