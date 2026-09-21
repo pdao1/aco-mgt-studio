@@ -23,7 +23,9 @@ export default function IdentityGate({children,product}:{children?:ReactNode;pro
   },[product,attempt]);
   if(error)return <main className="loading-screen"><p role="alert">{error}</p><button className="primary-action" onClick={()=>{setError('');setAttempt(value=>value+1);}}>Try again</button></main>;
   if(!state)return <main className="loading-screen">Checking your sign-in…</main>;
-  if(!state.discordAvailable&&children)return <>{children}</>;
+  // Keep the serial-first Solo flow available so an existing buyer can link
+  // Discord from the authenticated dashboard afterward.
+  if(children&&(product==='solo'||!state.discordAvailable))return <>{children}</>;
   if(state.status==='linked'&&children)return <>{children}</>;
   return <IdentityLogin state={state}/>;
 }

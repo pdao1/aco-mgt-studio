@@ -1,8 +1,9 @@
 # Customer access and Solo Buyer service
 
-ACO Studio uses one Discord-first identity flow for both products. A user signs
-in with Discord, then either links an existing Solo serial or ACO workspace
-credentials, or lets a verified Whop purchase provision access automatically.
+ACO Studio uses one shared Discord identity flow for both products. A user can
+sign in with Discord first and then link an existing service, or sign in to an
+existing Solo service with its serial and link Discord from the dashboard. A
+verified Whop purchase can also provision access automatically.
 The browser receives a signed, HttpOnly cookie; no serial, password, or Discord
 OAuth token is stored in the browser.
 
@@ -92,11 +93,12 @@ membership.
 
 ## Existing services
 
-An existing Solo customer selects **Solo Buyer** and enters the serial once.
-An existing ACO operator selects **ACO workspace** and enters the workspace ID
-and password once. The service is then bound to that Discord ID. A service can
-only be linked to one Discord identity, while a Discord identity can own both a
-Solo service and an ACO workspace.
+An existing Solo customer can select **Solo Buyer** and enter the serial once,
+then use **Link Discord account for login:** in the dashboard header. An
+existing ACO operator selects **ACO workspace** and enters the workspace ID and
+password once. The service is then bound to that Discord ID. A service can only
+be linked to one Discord identity, while a Discord identity can own both a Solo
+service and an ACO workspace.
 
 Individual Solo serials are still created from the Render service shell:
 

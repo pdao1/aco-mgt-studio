@@ -54,6 +54,21 @@ export class IdentityRepository {
     });
   }
 
+  async linkExistingSolo(identity: DiscordIdentity, workspaceId: string) {
+    return this.transaction(async client => {
+      const result = await client.query<{workspace_id:string;discord_id:string|null}>(`SELECT a.workspace_id,a.discord_id
+        FROM solo_accounts a JOIN workspaces w ON w.id=a.workspace_id
+        WHERE a.workspace_id=$1 AND a.access_expires_at>now() AND workspace_has_access(a.workspace_id) AND w.product_type='solo' FOR UPDATE`, [workspaceId]);
+      const account = result.rows[0];
+      if (!account) throw new LinkError('That Solo Buyer service is invalid, expired, or suspended.');
+      if (account.discord_id && account.discord_id !== identity.id) throw new LinkError('That Solo service is already linked to another Discord account.');
+      const other = await client.query('SELECT id FROM solo_accounts WHERE discord_id=$1 AND workspace_id<>$2', [identity.id, workspaceId]);
+      if (other.rowCount) throw new LinkError('This Discord account already has a Solo Buyer service.');
+      await bindDiscord(client, identity, workspaceId);
+      await client.query('UPDATE solo_accounts SET discord_id=$1,updated_at=now() WHERE workspace_id=$2', [identity.id, workspaceId]);
+    });
+  }
+
   async linkWorkspace(identity: DiscordIdentity, slug: string, password: string) {
     const credentials = await this.core.credentialsForSlug(slug);
     const valid = await verifyPassword(password, credentials?.password_hash ?? null);

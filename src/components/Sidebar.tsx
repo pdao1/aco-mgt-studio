@@ -32,7 +32,7 @@ export function Sidebar({ active, workspace, onNavigate, onLogout }: SidebarProp
     <aside className="app-sidebar" aria-label="Primary navigation">
       <button className="brand" onClick={() => onNavigate('overview')} aria-label={`${displayName} home`}>
         <span className="brand-mark">{workspace.settings.logoUrl ? <img src={workspace.settings.logoUrl} alt="" /> : <Boxes size={19} strokeWidth={2.2} />}</span>
-        <span>{displayName}</span>
+        <span className="brand-copy"><strong>{displayName}</strong><small>ACO License</small></span>
       </button>
 
       <nav className="primary-nav">

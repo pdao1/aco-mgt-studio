@@ -175,7 +175,7 @@ app.get(['/oauth/discord','/api/auth/discord/callback','/api/solo/auth/discord/c
 app.get('/api/solo/auth/discord',discordAuth.begin);
 app.use('/api/auth',discordAuth.router);
 // Once Discord is configured, legacy credential endpoints cannot bypass identity binding.
-app.post(['/api/access/activate','/api/auth/login','/api/auth/register','/api/solo/auth/serial'],(request,response,next)=>{
+app.post(['/api/access/activate','/api/auth/login','/api/auth/register'],(request,response,next)=>{
   if(!discordAuth.enabled){next();return;}
   response.status(409).json({error:'DISCORD_AUTH_REQUIRED',message:'Sign in with Discord at /login, then link your service.'});
 });

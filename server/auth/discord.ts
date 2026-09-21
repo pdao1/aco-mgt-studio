@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { AppConfig } from '../config.js';
 import type { Repository } from '../database/repository.js';
 import { exchangeDiscordCode, type DiscordIdentity } from '../solo/discord.js';
-import { clearSoloSession, issueSoloSession, readValue, signValue } from '../solo/session.js';
+import { clearSoloSession, issueSoloSession, readValue, signValue, SOLO_COOKIE, type SoloSession } from '../solo/session.js';
+import { SoloRepository } from '../solo/repository.js';
 import { clearSession, issueSession, loginRateLimit } from '../security/session.js';
 import { issueServiceAccess } from '../security/access.js';
 import { IdentityRepository, LinkError, type LinkedService } from './repository.js';
@@ -23,7 +24,7 @@ export function clearDiscordSession(response: Response, secure: boolean) {
 }
 
 export function createDiscordAuth(config: AppConfig, core: Repository) {
-  const router = Router(), accounts = new IdentityRepository(core), limiter = loginRateLimit();
+  const router = Router(), accounts = new IdentityRepository(core), soloAccounts = new SoloRepository(core), limiter = loginRateLimit();
   const enabled = Boolean(config.discordClientId && config.discordClientSecret), secure = config.nodeEnv === 'production';
   function issue(response: Response, identity: DiscordIdentity, service: LinkedService | null) {
     const duration = service ? Math.min(DURATION,service.solo ? Date.parse(service.solo.accessExpiresAt)-Date.now() : DURATION) : 15*60000;
@@ -42,6 +43,12 @@ export function createDiscordAuth(config: AppConfig, core: Repository) {
     const service=await accounts.resolve(identity.discordId,identity.workspaceId);
     return service && service.version===identity.version ? service : null;
   }
+  async function authenticatedLegacySolo(request:Request) {
+    const session=readValue<SoloSession>(request.cookies?.[SOLO_COOKIE],'solo-session',config.sessionSecret);
+    if(!session) return null;
+    const account=await soloAccounts.byId(session.accountId);
+    return account && account.sessionVersion===session.version ? account : null;
+  }
   const begin = (request:Request,response:Response) => {
     if (!enabled) {response.redirect('/login?error=discord-unavailable');return;}
     const state={nonce:randomBytes(32).toString('base64url'),expiresAt:Date.now()+10*60000};
@@ -57,7 +64,12 @@ export function createDiscordAuth(config: AppConfig, core: Repository) {
     if (!enabled || !state || request.query.state!==state.nonce || typeof request.query.code!=='string') {response.redirect('/login?error=discord-failed');return;}
     try {
       const identity=await exchangeDiscordCode(request.query.code,config.discordClientId!,config.discordClientSecret!,config.discordRedirectUri);
-      const service=await accounts.resolve(identity.id);
+      let service=await accounts.resolve(identity.id);
+      const legacySolo=await authenticatedLegacySolo(request);
+      if(legacySolo && (!service || service.product==='aco')) {
+        await accounts.linkExistingSolo(identity,legacySolo.workspaceId);
+        service=await accounts.resolve(identity.id,legacySolo.workspaceId);
+      }
       issue(response,identity,service);
       response.redirect(service?.path??'/login');
     } catch {response.redirect('/login?error=discord-failed');}
@@ -111,7 +123,10 @@ export function createDiscordAuth(config: AppConfig, core: Repository) {
       if(!enabled){next();return;}
       try {
         const service=await authenticatedService(request);
-        if(!service||service.product!==product){response.status(401).json({message:'Sign in with Discord and link the correct service.',error:'DISCORD_AUTH_REQUIRED'});return;}
+        if(!service||service.product!==product){
+          if(product==='solo' && await authenticatedLegacySolo(request)){next();return;}
+          response.status(401).json({message:'Sign in with Discord and link the correct service.',error:'DISCORD_AUTH_REQUIRED'});return;
+        }
         request.discordWorkspaceId=service.workspaceId;
         next();
       } catch(error){next(error);}
