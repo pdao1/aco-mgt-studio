@@ -86,4 +86,14 @@ describe('PostgreSQL tenant and privacy schema', () => {
     expect(sql).toContain("WHEN 'confirmed' THEN 2");
     expect(sql).toContain("status IN ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled')");
   });
+
+  it('stores workspace-scoped parser corrections without raw email bodies', async () => {
+    const sql = await readFile(new URL('../server/database/migrations/012_parser_feedback.sql', import.meta.url), 'utf8');
+    expect(sql).toContain('archived_at timestamptz');
+    expect(sql).toContain('hidden_item_keys jsonb');
+    expect(sql).toContain('redacted_excerpt text');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS parser_feedback');
+    expect(sql).toContain('ALTER TABLE parser_feedback FORCE ROW LEVEL SECURITY;');
+    expect(sql).not.toMatch(/raw_(?:email|body|message)/i);
+  });
 });

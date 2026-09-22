@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleDollarSign, Users, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDollarSign, ShoppingBag, TrendingUp, XCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { formatMoney, titleCaseStatus } from '../lib/format';
 import { StoreMark } from './OrdersTable';
@@ -11,15 +11,15 @@ interface OverviewViewProps {
 }
 
 export function OverviewView({ customers, orders, onOpenCustomer }: OverviewViewProps) {
-  const completed = orders.filter((order) => order.status === 'delivered').length;
-  const processing = orders.filter((order) => order.status === 'processing').length;
-  const cancelled = orders.filter((order) => order.status === 'cancelled').length;
-  const chargeableOrders = orders.filter((order) => order.status !== 'cancelled');
+  const activeOrders = orders.filter((order) => !order.isArchived);
+  const cancelled = activeOrders.filter((order) => order.status === 'cancelled').length;
+  const chargeableOrders = activeOrders.filter((order) => order.status !== 'cancelled');
   const currencies = new Set(chargeableOrders.map((order) => order.currency));
-  const serviceFeeTotal = chargeableOrders.reduce((sum, order) => sum + (order.feeCents ?? 0), 0);
+  const totalSpent = chargeableOrders.reduce((sum, order) => sum + (order.totalCents ?? 0), 0);
   const currency = chargeableOrders[0]?.currency ?? 'USD';
-  const serviceFeeLabel = currencies.size > 1 ? 'Multiple' : formatMoney(serviceFeeTotal, currency);
-  const attentionOrders = orders
+  const totalSpentLabel = currencies.size > 1 ? 'Multiple' : formatMoney(totalSpent, currency);
+  const stickRate = activeOrders.length === 0 ? '—' : `${Math.round((activeOrders.length - cancelled) / activeOrders.length * 100)}%`;
+  const attentionOrders = activeOrders
     .filter((order) => order.status === 'processing' || order.status === 'cancelled')
     .slice(0, 8);
 
@@ -32,11 +32,10 @@ export function OverviewView({ customers, orders, onOpenCustomer }: OverviewView
       </header>
 
       <section className="overview-metrics" aria-label="Workspace totals">
-        <OverviewMetric icon={<Users size={19} />} label="Customers" value={customers.length.toString()} detail="Connected customer inboxes" />
-        <OverviewMetric icon={<CheckCircle2 size={19} />} label="Completed" value={completed.toString()} detail={percentOf(completed, orders.length)} tone="green" />
-        <OverviewMetric icon={<AlertTriangle size={19} />} label="Processing" value={processing.toString()} detail="In progress" tone="amber" />
-        <OverviewMetric icon={<XCircle size={19} />} label="Cancelled" value={cancelled.toString()} detail="Excluded from invoices" tone="red" />
-        <OverviewMetric icon={<CircleDollarSign size={19} />} label="Service fees" value={serviceFeeLabel} detail={currencies.size > 1 ? 'Multiple currencies' : 'Excludes retailer purchases'} tone="blue" />
+        <OverviewMetric icon={<ShoppingBag size={19} />} label="Total orders" value={activeOrders.length.toString()} detail="Active order records" />
+        <OverviewMetric icon={<CircleDollarSign size={19} />} label="Total spent" value={totalSpentLabel} detail={currencies.size > 1 ? 'Multiple currencies' : 'Cancelled orders excluded'} tone="green" />
+        <OverviewMetric icon={<XCircle size={19} />} label="Total cancels" value={cancelled.toString()} detail="Excluded from active spend" tone="red" />
+        <OverviewMetric icon={<TrendingUp size={19} />} label="Net stick rate" value={stickRate} detail="Orders not cancelled" tone="blue" />
       </section>
 
       <section className="overview-attention" aria-labelledby="attention-title">
@@ -91,8 +90,4 @@ export function OverviewView({ customers, orders, onOpenCustomer }: OverviewView
 
 function OverviewMetric({ icon, label, value, detail, tone = 'blue' }: { icon: ReactNode; label: string; value: string; detail: string; tone?: 'blue' | 'green' | 'amber' | 'red' }) {
   return <div className="overview-metric"><span className={`overview-metric-icon ${tone}`}>{icon}</span><span><small>{label}</small><strong>{value}</strong><em>{detail}</em></span></div>;
-}
-
-function percentOf(value: number, total: number) {
-  return total === 0 ? '0% of all orders' : `${Math.round(value / total * 100)}% of all orders`;
 }

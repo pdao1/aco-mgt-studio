@@ -33,6 +33,9 @@ export interface ParsedOrderItem {
   quantity: number;
   unitPriceCents: number | null;
   totalCents: number | null;
+  /** Dashboard-only metadata; parser outputs leave these unset. */
+  key?: string;
+  hidden?: boolean;
 }
 
 export interface EmailParseContext {
@@ -301,7 +304,7 @@ function boundReceiptItemSection(lines: string[]): string[] {
 
 function parseItemLine(value: string, labelled: boolean, adjacentDetails: string): ParsedOrderItem | null {
   const line = value.replace(/^[-*•]\s*/, '').trim();
-  if (!line || (!labelled && (isMetadataLine(line) || isNarrativeLine(line)))) return null;
+  if (!line || isAddressLine(line) || (!labelled && (isMetadataLine(line) || isNarrativeLine(line)))) return null;
 
   const detailText = `${line}${adjacentDetails ? ` | ${adjacentDetails}` : ''}`;
   const quantityMatch = detailText.match(/(?:^|[|\s])(?:qty|quantity)\b[^\d]{0,20}(\d{1,3})\b/i)
@@ -330,7 +333,7 @@ function parseItemLine(value: string, labelled: boolean, adjacentDetails: string
     .replace(/\s+/g, ' ')
     .trim();
   if (name.length < 2 || name.length > 240 || !/[A-Za-z]/.test(name)
-    || isMetadataLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)
+    || isMetadataLine(name) || isAddressLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)
     || isNonProductLine(name)) return null;
 
   const price = moneyMatches.at(-1)?.[1];
@@ -358,7 +361,17 @@ function parseMoneyCents(value: string): number | null {
 }
 
 function isMetadataLine(value: string): boolean {
-  return /^(?:order|confirmation|subtotal|shipping|delivery|tax|grand\s+total|total|payment|billing|shipping\s+address|billing\s+address|tracking|status|date|email|phone|credit\s+card|qty|quantity|items?|products?)\b/i.test(value);
+  return /^(?:order|confirmation|subtotal|shipping|delivery|delivers?|delivered|ship(?:ped)?|recipient|tax|grand\s+total|total|payment|billing|shipping\s+address|billing\s+address|tracking|status|date|email|phone|credit\s+card|order\s+timeline|qty|quantity|items?|products?)\b/i.test(value);
+}
+
+function isAddressLine(value: string): boolean {
+  const line = value.trim();
+  // Fulfillment blocks commonly arrive as separate text rows. Treat both the
+  // label and the address itself as metadata so nearby Qty/price rows cannot
+  // turn them into purchased products.
+  return /^(?:delivers?|delivered|ships?|shipping|delivery)\s+to\b/i.test(line)
+    || /\b(?:p\.?o\.?\s+box|apt\.?|apartment|unit|suite|ste\.?|street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|highway|hwy\.?|parkway|pkwy\.?)\b/i.test(line) && /\d/.test(line)
+    || /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(line);
 }
 
 function isValueOnlyLine(value: string): boolean {
@@ -387,6 +400,7 @@ function hasItemEvidence(value: string): boolean {
 
 function looksLikeItemStart(value: string): boolean {
   return !isMetadataLine(value)
+    && !isAddressLine(value)
     && !isNarrativeLine(value)
     && !isValueOnlyLine(value)
     && !/^(?:color|colour|size|variant|style|sku|model|condition|each)\b/i.test(value)

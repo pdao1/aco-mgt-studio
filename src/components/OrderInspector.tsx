@@ -1,4 +1,4 @@
-import { Copy, ExternalLink, X } from 'lucide-react';
+import { Copy, Eye, EyeOff, ExternalLink, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { FeeBasis, Order, OrderStatus, UpdateOrderFeeInput } from '../types';
 import { calculateFeeCents, formatDate, formatDateTime, formatMoney, formatPercent, maskTracking, titleCaseStatus } from '../lib/format';
@@ -10,11 +10,12 @@ interface OrderInspectorProps {
   onClose: () => void;
   onFeeSave: (orderId: string, input: UpdateOrderFeeInput) => Promise<void>;
   onOverrideSave: (orderId: string, status: OrderStatus | null, note: string | null) => Promise<void>;
+  onHideItem: (orderId: string, itemIndex: number, hidden: boolean) => Promise<void>;
   savingFee?: boolean;
   savingOverride?: boolean;
 }
 
-export function OrderInspector({ order, customerName, onClose, onFeeSave, onOverrideSave, savingFee = false, savingOverride = false }: OrderInspectorProps) {
+export function OrderInspector({ order, customerName, onClose, onFeeSave, onOverrideSave, onHideItem, savingFee = false, savingOverride = false }: OrderInspectorProps) {
   const [feeInput, setFeeInput] = useState(String(order.feePercent));
   const [feeBasis, setFeeBasis] = useState<FeeBasis>(order.feeBasis);
   const [customBasisInput, setCustomBasisInput] = useState(
@@ -24,6 +25,7 @@ export function OrderInspector({ order, customerName, onClose, onFeeSave, onOver
   const [overrideStatus, setOverrideStatus] = useState<OrderStatus | ''>(order.isManualOverride ? order.status : '');
   const [overrideNote, setOverrideNote] = useState(order.overrideNote ?? '');
   const [overrideError, setOverrideError] = useState('');
+  const [savingItemIndex, setSavingItemIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setFeeInput(String(order.feePercent));
@@ -88,6 +90,25 @@ export function OrderInspector({ order, customerName, onClose, onFeeSave, onOver
     }
   };
 
+  const toggleItem = async (itemIndex: number, hidden: boolean) => {
+    setSavingItemIndex(itemIndex);
+    try {
+      await onHideItem(order.id, itemIndex, hidden);
+    } finally {
+      setSavingItemIndex(null);
+    }
+  };
+
+  const renderItem = (item: Order['items'][number], index: number) => {
+    const lineTotal = item.totalCents ?? (item.unitPriceCents === null ? null : item.unitPriceCents * item.quantity);
+    return (
+      <li key={`${item.key ?? item.name}-${index}`} className={item.hidden ? 'hidden-order-item' : ''}>
+        <span><strong>{item.name}</strong><small>Qty {item.quantity}{item.unitPriceCents !== null ? ` · ${formatMoney(item.unitPriceCents, order.currency)} each` : ''}</small></span>
+        <span className="order-item-actions"><b>{formatMoney(lineTotal, order.currency)}</b><button type="button" className="item-visibility-button" onClick={() => void toggleItem(index, !item.hidden)} disabled={savingItemIndex === index} aria-label={item.hidden ? `Restore ${item.name}` : `Hide ${item.name}`} title={item.hidden ? 'Restore item' : 'Hide item'}>{item.hidden ? <Eye size={14} /> : <EyeOff size={14} />}</button></span>
+      </li>
+    );
+  };
+
   return (
     <aside className="inspector" aria-label={`Order ${order.orderNumber}`}>
       <div className="inspector-heading">
@@ -113,14 +134,12 @@ export function OrderInspector({ order, customerName, onClose, onFeeSave, onOver
       </dl>
 
       <section className="order-items-section" aria-labelledby="order-items-title">
-        <div className="order-items-heading"><h3 id="order-items-title">Items purchased</h3><span>{order.itemCount ? `${order.itemCount} ${order.itemCount === 1 ? 'item' : 'items'}` : 'Details pending'}</span></div>
+        <div className="order-items-heading"><h3 id="order-items-title">Items purchased</h3><span>{order.itemCount !== null ? `${order.itemCount} ${order.itemCount === 1 ? 'item' : 'items'}` : 'Details pending'}</span></div>
         {order.items?.length ? (
-          <ul className="order-items-list">
-            {order.items.map((item, index) => {
-              const lineTotal = item.totalCents ?? (item.unitPriceCents === null ? null : item.unitPriceCents * item.quantity);
-              return <li key={`${item.name}-${index}`}><span><strong>{item.name}</strong><small>Qty {item.quantity}{item.unitPriceCents !== null ? ` · ${formatMoney(item.unitPriceCents, order.currency)} each` : ''}</small></span><b>{formatMoney(lineTotal, order.currency)}</b></li>;
-            })}
-          </ul>
+          <>
+            <ul className="order-items-list">{order.items.map((item, index) => !item.hidden && renderItem(item, index))}</ul>
+            {order.hiddenItemCount > 0 && <div className="hidden-items-block"><p>Hidden from item totals · correction recorded for parser improvement</p><ul className="order-items-list hidden-items-list">{order.items.map((item, index) => item.hidden && renderItem(item, index))}</ul></div>}
+          </>
         ) : <p className="order-items-empty">Item details will appear after a confirmation email with line items is synchronized.</p>}
       </section>
 

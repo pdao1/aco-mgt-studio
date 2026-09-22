@@ -1,4 +1,4 @@
-import { Check, LockKeyhole, Palette, Save } from 'lucide-react';
+import { Check, Download, LockKeyhole, Palette, Save } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import type { WorkspaceSettings } from '../types';
 import { WORKSPACE_THEMES } from '../lib/themes';
@@ -58,6 +58,11 @@ export function SettingsView({ settings, workspaceSlug, onSave, onChangePassword
       <div className="settings-actions"><span className="settings-note" role="status">{saved ? 'Workspace settings saved.' : 'Issued invoices keep their original company name.'}</span><button className="primary-action" disabled={saving || !form.displayName.trim()}>{saved ? <><Check size={16} /> Saved</> : <><Save size={16} /> {saving ? 'Saving…' : 'Save settings'}</>}</button></div>
       {error && <p className="form-error" role="alert">{error}</p>}
     </form>
+    <section className="settings-panel parser-feedback-settings">
+      <h2>Parser feedback</h2>
+      <p>Hide or restore item rows from order details to build a workspace-scoped correction set. Download the redacted JSONL when you want to review or run offline evaluations.</p>
+      <a className="secondary-action" href="/api/parser-feedback/export"><Download size={16} /> Download feedback JSONL</a>
+    </section>
     <PasswordSettings onChangePassword={onChangePassword} />
   </section>;
 }

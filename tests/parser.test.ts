@@ -204,6 +204,35 @@ describe('parseOrderEmail', () => {
     ]);
   });
 
+  it('does not treat fulfillment labels or delivery addresses as purchased items', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<target-address-block@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Your Target order is ready',
+      text: [
+        'Order number: 912003774472093',
+        'Items purchased',
+        'Pokémon Trading Card Game: 30th Celebration Tin (Sylveon or Greninja)- Styles May Vary',
+        'Qty 2',
+        'Delivers to',
+        'Anh Dao, 3600 AOLELE ST, UNIT #30234, Honolulu, HI 96820',
+        'Qty 2',
+        'Order timeline',
+      ].join('\n'),
+      html: null,
+      receivedAt: new Date('2026-09-15T10:15:00.000Z'),
+    });
+
+    expect(parsed?.items).toEqual([{
+      name: 'Pokémon Trading Card Game: 30th Celebration Tin (Sylveon or Greninja)- Styles May Vary',
+      quantity: 2,
+      unitPriceCents: null,
+      totalCents: null,
+    }]);
+    expect(parsed?.itemCount).toBe(2);
+  });
+
   it('does not promote recommendation headings or CSS fragments to purchased items', () => {
     const parsed = parseOrderEmail({
       messageId: '<noisy-items@example>',

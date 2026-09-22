@@ -21,6 +21,7 @@ Solo Buyers enter at `/customer` and sign in with an individual product serial o
 - Draft invoices snapshot selected service fees, preserve the purchase and fee basis as informational references, and lock fee edits after issue. Stripe Invoicing charges only ACO service fees; signed webhooks update paid/open/void states idempotently.
 - Manual status overrides are stored separately from parsed email state and are visible in the customer timeline and portal.
 - Selecting an order opens an item overview with extracted product names, quantities, and available line prices for both the operator and customer views.
+- Order rows can be archived from active calculations, and individual item rows can be hidden/restored in the operator inspector. These corrections are recorded as redacted parser feedback, used as same-retailer review examples, and downloadable from Settings as JSONL for evaluation.
 - Mailbox sync scans the bounded customer mailbox window instead of depending on retailer subject keywords. It matches order numbers against the customer's existing orders before applying updates, so different retailer sender addresses do not create duplicate orders or miss cancellations.
 - Order identifiers must contain at least one digit. Legacy prose-only parser artifacts are excluded from dashboards and billing without deleting the underlying history.
 - A beta serial gate protects the operator surface. The serial is server-side (`SERVICE_SERIAL`) and unlocks a signed, HttpOnly access cookie; it is never shipped to the browser.

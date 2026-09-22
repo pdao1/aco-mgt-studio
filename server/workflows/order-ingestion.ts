@@ -38,6 +38,17 @@ export async function runOrderIngestion(
   meta: ProcessedMessageMeta,
   dependencies: OrderIngestionDependencies,
 ): Promise<OrderIngestionResult> {
+  const redactedSource = buildRedactedEnrichmentInput({
+    messageKey: meta.messageKey,
+    fromAddress: meta.fromAddress,
+    subject: meta.subject,
+    text: email.text,
+    receivedAt: meta.receivedAt,
+  }).bodyExcerpt;
+  const persistedMeta: ProcessedMessageMeta = {
+    ...meta,
+    redactedExcerpt: meta.redactedExcerpt ?? redactedSource,
+  };
   const deterministic = dependencies.parse(email);
   if (deterministic) {
     const enricher = dependencies.enricher;
@@ -49,6 +60,12 @@ export async function runOrderIngestion(
       && deterministic.status !== 'cancelled'
       && (!budget || budget.remaining > 0)) {
       let repairFeedback: string | undefined;
+      let feedbackExamples: Array<{ itemName: string; quantity: number | null }> = [];
+      try {
+        feedbackExamples = await dependencies.repository.listParserFeedbackExamples?.(workspaceId, deterministic.merchant, 5) ?? [];
+      } catch (error) {
+        console.warn(`[order-enrichment] parser feedback lookup skipped reason=${safeErrorMessage(error)}`);
+      }
       for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS_PER_MESSAGE; attempt += 1) {
         if (budget && budget.remaining <= 0) break;
         if (budget) budget.remaining -= 1;
@@ -63,6 +80,7 @@ export async function runOrderIngestion(
             merchant: deterministic.merchant,
             orderNumber: deterministic.orderNumber,
             deterministicItems: deterministic.items,
+            feedbackExamples,
             repairAttempt: attempt,
             repairFeedback,
           }));
@@ -87,7 +105,7 @@ export async function runOrderIngestion(
         repairFeedback = 'The previous response was not valid structured item data. Retry with only explicit purchasable rows, or return an empty items array.';
       }
     }
-    const matched = await dependencies.repository.recordMessage(workspaceId, customerId, meta, normalized);
+    const matched = await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, normalized);
     return { matched, source: itemReviewAccepted ? 'ai' : 'deterministic', validation: matched ? 'accepted' : 'skipped' };
   }
 
@@ -95,7 +113,7 @@ export async function runOrderIngestion(
   // Do not call the model for newsletters, one-time PINs, or other messages
   // the deterministic parser already classified as unrelated.
   if (enricher.name === 'none' || isOneTimePinEmail(email) || isCancellationNotice(email) || !isLikelyOrderMessage(email)) {
-    await dependencies.repository.recordMessage(workspaceId, customerId, meta, null);
+    await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, null);
     return { matched: false, source: enricher.name === 'none' ? 'none' : 'ai', validation: 'skipped' };
   }
 
@@ -121,7 +139,7 @@ export async function runOrderIngestion(
     }
     const normalized = validateEnrichedOrder(enriched, { messageKey: meta.messageKey, receivedAt: meta.receivedAt });
     if (normalized && isGroundedOrderNumber(normalized.orderNumber, email)) {
-      const matched = await dependencies.repository.recordMessage(workspaceId, customerId, meta, normalized);
+      const matched = await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, normalized);
       return { matched, source: 'ai', validation: matched ? 'accepted' : 'skipped' };
     }
     repairFeedback = normalized
@@ -129,7 +147,7 @@ export async function runOrderIngestion(
       : 'The previous response failed validation. Retry with the exact structured schema and return null fields instead of guessing.';
   }
 
-  await dependencies.repository.recordMessage(workspaceId, customerId, meta, null);
+  await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, null);
   return { matched: false, source: 'ai', validation: 'rejected' };
 }
 

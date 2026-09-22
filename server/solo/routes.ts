@@ -98,7 +98,7 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
       const data=await repository.dashboard(account.workspaceId,null);
       response.json({account:{handle:account.handle,displayName:account.displayName,discordLinked:Boolean(account.discordId),discordAvailable:discordReady,accessExpiresAt:account.accessExpiresAt,mailboxLimit:account.mailboxLimit},
         appearance:{theme:data.workspace.settings.theme,accentColor:data.workspace.settings.accentColor},mailboxes:data.customers,
-        orders:data.orders.map(({feePercent,feeBasis,customBasisCents,feeBasisCents,feeCents,billingStatus,invoiceId,...order})=>order),
+        orders:data.orders.filter(order=>!order.isArchived).map(({feePercent,feeBasis,customBasisCents,feeBasisCents,feeCents,billingStatus,invoiceId,...order})=>order),
         tracking:{providers:trackingProvider.availability(),environment:config.trackingEnvironment,...coordinators(account.workspaceId).tracking.summary},
       });
     } catch(error){next(error);}

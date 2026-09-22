@@ -147,6 +147,8 @@ describe('order enrichment boundary', () => {
       expect(body.store).toBe(false);
       expect(body.text.format.type).toBe('json_schema');
       expect(body.input).not.toContain('buyer@example.com');
+      expect(body.input).toContain('Operator corrections for this retailer');
+      expect(body.input).toContain('Delivers to');
       return new Response(JSON.stringify({
         output_text: JSON.stringify({
           items: [{ name: 'Air Max 90', quantity: 1, unitPriceCents: 12000, totalCents: null }],
@@ -164,6 +166,7 @@ describe('order enrichment boundary', () => {
       orderNumber: 'EX-12001',
       receivedAt: new Date('2026-08-20T12:00:00Z'),
       bodyExcerpt: 'Product: Air Max 90\nQty: 1\n$120.00',
+      feedbackExamples: [{ itemName: 'Delivers to', quantity: 2 }],
     });
 
     expect(result).toEqual({ items: [{ name: 'Air Max 90', quantity: 1, unitPriceCents: 12000, totalCents: null }] });

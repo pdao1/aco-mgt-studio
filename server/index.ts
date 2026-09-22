@@ -601,6 +601,56 @@ app.patch('/api/orders/:orderId/override', async (request, response, next) => {
   }
 });
 
+const archiveOrderSchema = z.object({ archived: z.boolean() }).strict();
+app.patch('/api/orders/:orderId/archive', async (request, response, next) => {
+  const parsed = archiveOrderSchema.safeParse(request.body);
+  if (!parsed.success || !isUuid(request.params.orderId)) {
+    response.status(400).json({ error: 'INVALID_ARCHIVE_REQUEST', message: 'That archive request is invalid.' });
+    return;
+  }
+  try {
+    const result = await repository.archiveOrder(request.workspaceId!, request.params.orderId, parsed.data.archived);
+    if (!result) {
+      response.status(404).json({ error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+      return;
+    }
+    response.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const itemVisibilitySchema = z.object({ hidden: z.boolean() }).strict();
+app.patch('/api/orders/:orderId/items/:itemIndex/visibility', async (request, response, next) => {
+  const parsed = itemVisibilitySchema.safeParse(request.body);
+  const itemIndex = Number.parseInt(request.params.itemIndex, 10);
+  if (!parsed.success || !isUuid(request.params.orderId) || !/^\d+$/.test(request.params.itemIndex) || !Number.isSafeInteger(itemIndex) || itemIndex > 49) {
+    response.status(400).json({ error: 'INVALID_ITEM_VISIBILITY', message: 'That item visibility request is invalid.' });
+    return;
+  }
+  try {
+    const result = await repository.hideOrderItem(request.workspaceId!, request.params.orderId, itemIndex, parsed.data.hidden);
+    if (!result) {
+      response.status(404).json({ error: 'ITEM_NOT_FOUND', message: 'That order item was not found.' });
+      return;
+    }
+    response.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/parser-feedback/export', async (request, response, next) => {
+  try {
+    const feedback = await repository.listParserFeedback(request.workspaceId!);
+    response.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    response.setHeader('Content-Disposition', 'attachment; filename="parser-feedback.jsonl"');
+    response.send(feedback.map((row) => JSON.stringify(row)).join('\n'));
+  } catch (error) {
+    next(error);
+  }
+});
+
 const serverDirectory = dirname(fileURLToPath(import.meta.url));
 const distDirectory = join(serverDirectory, '..', 'dist');
 if (existsSync(distDirectory)) {

@@ -49,6 +49,13 @@ export interface ProcessedMessageMeta {
   fromAddress: string;
   subject: string;
   receivedAt: Date;
+  /** Privacy-safe excerpt used to explain later parser corrections. */
+  redactedExcerpt?: string;
+}
+
+export interface ParserFeedbackExample {
+  itemName: string;
+  quantity: number | null;
 }
 
 export interface OrderFeeRecord {
@@ -290,6 +297,8 @@ export class Repository {
         override_updated_at: Date | null;
         billing_invoice_id: string | null;
         billing_status: InvoiceRecord['status'] | null;
+        archived_at: Date | null;
+        hidden_item_keys: unknown;
         carrier: string | null;
         tracking_number: string | null;
         tracking_url: string | null;
@@ -299,6 +308,7 @@ export class Repository {
                o.total_cents, o.fee_basis_points, o.fee_basis, o.custom_fee_basis_cents,
                o.item_count, o.items, o.currency, o.status,
                o.status_override, o.override_note, o.override_updated_at, o.billing_invoice_id,
+               o.archived_at, o.hidden_item_keys,
                i.status AS billing_status,
                s.carrier, s.tracking_number, s.tracking_url, s.expected_delivery
         FROM orders o
@@ -363,6 +373,7 @@ export class Repository {
             order.fee_basis,
             order.custom_fee_basis_cents,
           );
+          const items = normalizeStoredOrderItems(order.items, order.hidden_item_keys);
           const events = (eventsByOrder.get(order.id) ?? []).map((event) => ({
             id: event.id,
             status: event.status,
@@ -396,8 +407,12 @@ export class Repository {
             invoiceId: order.billing_invoice_id,
             isManualOverride: Boolean(order.status_override),
             overrideNote: order.override_note,
-            itemCount: order.item_count,
-            items: normalizeStoredOrderItems(order.items),
+            itemCount: items.length > 0
+              ? items.filter((item) => !item.hidden).reduce((sum, item) => sum + item.quantity, 0)
+              : order.item_count,
+            items,
+            isArchived: Boolean(order.archived_at),
+            hiddenItemCount: items.filter((item) => item.hidden).length,
             currency: order.currency.trim(),
             status: effectiveStatus,
             carrier: order.carrier,
@@ -425,7 +440,7 @@ export class Repository {
     return {
       customer: { id: customer.id, name: customer.name },
       workspace: payload.workspace,
-      orders: payload.orders.filter((order) => order.customerId === customerId),
+      orders: payload.orders.filter((order) => order.customerId === customerId && !order.isArchived),
       invoices: billing.invoices.map((invoice) => ({ ...invoice, lastError: null })),
     };
   }
@@ -664,6 +679,7 @@ export class Repository {
           AND o.customer_id = $2
           AND o.id = ANY($3::uuid[])
           AND o.order_number ~ '[0-9]'
+          AND o.archived_at IS NULL
           AND o.billing_invoice_id IS NULL
           AND COALESCE(o.status_override, o.status) <> 'cancelled'
           AND (o.total_cents IS NOT NULL OR (o.fee_basis = 'custom_amount' AND o.custom_fee_basis_cents IS NOT NULL))
@@ -906,6 +922,156 @@ export class Repository {
     });
   }
 
+  async archiveOrder(workspaceId: string, orderId: string, archived: boolean): Promise<{ orderId: string; isArchived: boolean } | null> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const current = await client.query<{
+        customer_id: string;
+        merchant: string;
+        order_number: string;
+        source_message_key: string;
+      }>(`
+        SELECT customer_id, merchant, order_number, source_message_key
+        FROM orders
+        WHERE workspace_id = $1 AND id = $2
+        FOR UPDATE
+      `, [workspaceId, orderId]);
+      const row = current.rows[0];
+      if (!row) return null;
+      await client.query(`
+        UPDATE orders
+        SET archived_at = CASE WHEN $3 THEN now() ELSE NULL END,
+            updated_at = now()
+        WHERE workspace_id = $1 AND id = $2
+      `, [workspaceId, orderId, archived]);
+      await client.query(`
+        INSERT INTO parser_feedback(
+          id, workspace_id, customer_id, order_id, merchant, feedback_type,
+          source_message_key, prompt_version
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'order-items-repair.v2')
+      `, [
+        randomUUID(), workspaceId, row.customer_id, orderId, row.merchant,
+        archived ? 'archive_order' : 'restore_order', row.source_message_key,
+      ]);
+      return { orderId, isArchived: archived };
+    });
+  }
+
+  async hideOrderItem(
+    workspaceId: string,
+    orderId: string,
+    itemIndex: number,
+    hidden: boolean,
+  ): Promise<{ orderId: string; itemIndex: number; hidden: boolean } | null> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const current = await client.query<{
+        customer_id: string;
+        merchant: string;
+        source_message_key: string;
+        items: unknown;
+        hidden_item_keys: unknown;
+        redacted_excerpt: string | null;
+      }>(`
+        SELECT o.customer_id, o.merchant, o.source_message_key, o.items,
+               o.hidden_item_keys, pm.redacted_excerpt
+        FROM orders o
+        LEFT JOIN processed_messages pm
+          ON pm.workspace_id = o.workspace_id
+         AND pm.customer_id = o.customer_id
+         AND pm.message_key = o.source_message_key
+        WHERE o.workspace_id = $1 AND o.id = $2
+        FOR UPDATE OF o
+      `, [workspaceId, orderId]);
+      const row = current.rows[0];
+      if (!row) return null;
+      const items = normalizeStoredOrderItems(row.items, row.hidden_item_keys);
+      const item = items[itemIndex];
+      if (!item?.key) return null;
+      const hiddenKeys = new Set(normalizeHiddenItemKeys(row.hidden_item_keys));
+      if (hidden) hiddenKeys.add(item.key);
+      else hiddenKeys.delete(item.key);
+      await client.query(`
+        UPDATE orders
+        SET hidden_item_keys = $3::jsonb, updated_at = now()
+        WHERE workspace_id = $1 AND id = $2
+      `, [workspaceId, orderId, JSON.stringify([...hiddenKeys])]);
+      await client.query(`
+        INSERT INTO parser_feedback(
+          id, workspace_id, customer_id, order_id, merchant, feedback_type,
+          item_key, item_name, item_quantity, source_message_key, source_excerpt,
+          prompt_version
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'order-items-repair.v2')
+      `, [
+        randomUUID(), workspaceId, row.customer_id, orderId, row.merchant,
+        hidden ? 'hide_item' : 'restore_item', item.key, item.name, item.quantity,
+        row.source_message_key, row.redacted_excerpt,
+      ]);
+      return { orderId, itemIndex, hidden };
+    });
+  }
+
+  async listParserFeedbackExamples(workspaceId: string, merchant: string, limit = 5): Promise<ParserFeedbackExample[]> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{ item_name: string; item_quantity: number | null }>(`
+        SELECT item_name, item_quantity
+        FROM parser_feedback
+        WHERE workspace_id = $1
+          AND lower(merchant) = lower($2)
+          AND feedback_type = 'hide_item'
+          AND item_name IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT $3
+      `, [workspaceId, merchant, Math.min(Math.max(limit, 1), 20)]);
+      const seen = new Set<string>();
+      return result.rows.flatMap((row) => {
+        const key = `${row.item_name.toLowerCase()}\0${row.item_quantity ?? ''}`;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{ itemName: row.item_name, quantity: row.item_quantity }];
+      });
+    });
+  }
+
+  async listParserFeedback(workspaceId: string, limit = 5000): Promise<Array<{
+    id: string;
+    merchant: string;
+    feedbackType: string;
+    itemName: string | null;
+    itemQuantity: number | null;
+    sourceExcerpt: string | null;
+    promptVersion: string;
+    createdAt: string;
+  }>> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{
+        id: string;
+        merchant: string;
+        feedback_type: string;
+        item_name: string | null;
+        item_quantity: number | null;
+        source_excerpt: string | null;
+        prompt_version: string;
+        created_at: Date;
+      }>(`
+        SELECT id, merchant, feedback_type, item_name, item_quantity,
+               source_excerpt, prompt_version, created_at
+        FROM parser_feedback
+        WHERE workspace_id = $1
+        ORDER BY created_at ASC
+        LIMIT $2
+      `, [workspaceId, Math.min(Math.max(limit, 1), 10_000)]);
+      return result.rows.map((row) => ({
+        id: row.id,
+        merchant: row.merchant,
+        feedbackType: row.feedback_type,
+        itemName: row.item_name,
+        itemQuantity: row.item_quantity,
+        sourceExcerpt: row.source_excerpt,
+        promptVersion: row.prompt_version,
+        createdAt: row.created_at.toISOString(),
+      }));
+    });
+  }
+
   async createCustomer(
     workspaceId: string,
     input: { name: string; gmailAddress: string; syncDays: number; secretCiphertext: string },
@@ -1057,14 +1223,21 @@ export class Repository {
     return this.withWorkspace(workspaceId, async (client) => {
       const processed = await client.query<{ id: string }>(`
         INSERT INTO processed_messages(
-          id, workspace_id, customer_id, message_key, sender_domain, subject, received_at, matched_order
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          id, workspace_id, customer_id, message_key, sender_domain, subject, received_at, matched_order, redacted_excerpt
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (workspace_id, customer_id, message_key) DO NOTHING
         RETURNING id
       `, [
         randomUUID(), workspaceId, customerId, meta.messageKey,
-        extractDomain(meta.fromAddress), meta.subject.slice(0, 500), meta.receivedAt, Boolean(parsed),
+        extractDomain(meta.fromAddress), meta.subject.slice(0, 500), meta.receivedAt, Boolean(parsed), meta.redactedExcerpt ?? null,
       ]);
+      if (processed.rowCount === 0 && meta.redactedExcerpt) {
+        await client.query(`
+          UPDATE processed_messages
+          SET redacted_excerpt = COALESCE(redacted_excerpt, $4)
+          WHERE workspace_id = $1 AND customer_id = $2 AND message_key = $3
+        `, [workspaceId, customerId, meta.messageKey, meta.redactedExcerpt]);
+      }
       if (!parsed) return false;
 
       // A full-history sync may revisit a message that was already marked as
@@ -1331,8 +1504,9 @@ function extractDomain(email: string): string | null {
   return email.split('@')[1]?.toLowerCase() ?? null;
 }
 
-function normalizeStoredOrderItems(value: unknown): ParsedOrderItem[] {
+function normalizeStoredOrderItems(value: unknown, hiddenKeysValue: unknown = []): ParsedOrderItem[] {
   if (!Array.isArray(value)) return [];
+  const hiddenKeys = new Set(normalizeHiddenItemKeys(hiddenKeysValue));
   return value.slice(0, 50).flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return [];
     const item = entry as Partial<ParsedOrderItem>;
@@ -1344,13 +1518,30 @@ function normalizeStoredOrderItems(value: unknown): ParsedOrderItem[] {
     const totalCents = item.totalCents === null || item.totalCents === undefined ? null : item.totalCents;
     if ((unitPriceCents !== null && (!Number.isInteger(unitPriceCents) || unitPriceCents < 0))
       || (totalCents !== null && (!Number.isInteger(totalCents) || totalCents < 0))) return [];
-    return [{
+    const normalized = {
       name: item.name.trim().slice(0, 240),
       quantity,
       unitPriceCents,
       totalCents,
-    }];
+    } satisfies ParsedOrderItem;
+    const key = orderItemKey(normalized);
+    return [{ ...normalized, key, hidden: hiddenKeys.has(key) }];
   });
+}
+
+function normalizeHiddenItemKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string' && /^[a-f0-9]{64}$/i.test(entry)).slice(0, 100);
+}
+
+function orderItemKey(item: Pick<ParsedOrderItem, 'name' | 'quantity' | 'unitPriceCents' | 'totalCents'>): string {
+  return createHash('sha256')
+    .update([
+      item.name.trim().toLowerCase().replace(/\s+/g, ' '),
+      item.unitPriceCents ?? '',
+      item.totalCents ?? '',
+    ].join('\0'))
+    .digest('hex');
 }
 
 function isStoredNonProductName(value: string): boolean {

@@ -56,6 +56,8 @@ export interface OrderItem {
   quantity: number;
   unitPriceCents: number | null;
   totalCents: number | null;
+  key?: string;
+  hidden?: boolean;
 }
 
 export interface Order {
@@ -79,6 +81,8 @@ export interface Order {
   status: OrderStatus;
   itemCount: number | null;
   items: OrderItem[];
+  isArchived: boolean;
+  hiddenItemCount: number;
   carrier: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;

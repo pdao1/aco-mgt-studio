@@ -23,13 +23,14 @@ Stripe/Venmo payment links when configured.
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
 | Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, fetches headers first, skips processed Message-IDs, ignores one-time PINs and oversized non-order mail, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
 | Carrier tracking | `TrackingSyncCoordinator` polls active shipment rows on a bounded interval. USPS, UPS, and FedEx adapters use server-side OAuth credentials, cache tokens, map carrier vocabulary to the canonical order status, and fail soft per shipment. Delivered/cancelled shipments are not polled again. |
-| AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. |
+| AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. Operator archive/hide corrections are stored as redacted, workspace-scoped parser feedback, injected as compact same-retailer examples on later reviews, and exportable as JSONL for offline evals. |
+| Corrections | Archived orders are excluded from active KPIs, billing, portals, and Solo summaries. Hidden line items remain restorable in the operator inspector and are excluded from visible item counts; purchase totals are not rewritten by an item-label correction. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
 
 ## Product surfaces
 
-- **Overview**: customer count, completed orders, processing orders, cancelled
-  orders, ACO service fees, and a short needs-attention list.
+- **Overview**: total active orders, total spent, total cancels, net stick rate,
+  and a short needs-attention list.
 - **Customers**: one customer rail; the selected customer shows order status
   filters, search, tracking, fees, billing state, timeline, and manual status
   controls.
@@ -40,7 +41,8 @@ Stripe/Venmo payment links when configured.
   normalized order, informational purchase total, ACO service fee, current or manually overridden status,
   tracking, invoices, and optional Venmo payment links. No operator credentials or mailbox data are sent.
 - **Settings**: workspace-scoped customer-facing name/logo/color, seller email,
-  and Venmo URL. Settings are never shared with another node group.
+  Venmo URL, and a redacted parser-feedback JSONL export. Settings are never
+  shared with another node group.
 
 ## Data and state contracts
 

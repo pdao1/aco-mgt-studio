@@ -1,4 +1,4 @@
-import { ArrowDown, Search } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, MoreHorizontal, Search } from 'lucide-react';
 import { FaAmazon } from 'react-icons/fa6';
 import { SiAdidas, SiNike, SiStockx, SiTarget } from 'react-icons/si';
 import { TbBrandWalmart } from 'react-icons/tb';
@@ -8,6 +8,8 @@ import { formatDate, formatMoney, formatPercent, maskTracking, titleCaseStatus }
 import { filterOrders, listRetailers } from '../lib/orders';
 
 export type OrderFilter = 'all' | OrderStatus;
+export type DateWindow = 7 | 30 | 60 | 90 | null;
+export type SortDirection = 'asc' | 'desc';
 
 interface OrdersTableProps {
   orders: Order[];
@@ -20,6 +22,13 @@ interface OrdersTableProps {
   onQuery: (query: string) => void;
   onRetailer: (retailer: string) => void;
   onSelect: (order: Order) => void;
+  dateWindow: DateWindow;
+  sortDirection: SortDirection;
+  showArchived: boolean;
+  onDateWindow: (value: DateWindow) => void;
+  onSortDirection: (value: SortDirection) => void;
+  onShowArchived: (value: boolean) => void;
+  onArchive: (order: Order) => void;
 }
 
 const filters: Array<{ id: OrderFilter; label: string }> = [
@@ -66,6 +75,13 @@ export function OrdersTable({
   onQuery,
   onRetailer,
   onSelect,
+  dateWindow,
+  sortDirection,
+  showArchived,
+  onDateWindow,
+  onSortDirection,
+  onShowArchived,
+  onArchive,
 }: OrdersTableProps) {
   const retailerOrders = filterOrders(allOrders, { retailer });
   const count = (status: OrderFilter) => status === 'all'
@@ -98,6 +114,27 @@ export function OrdersTable({
               {retailers.map((name) => <option key={name.toLowerCase()} value={name}>{name}</option>)}
             </select>
           </label>
+          <label className="retailer-filter date-filter">
+            <span>Show</span>
+            <select value={dateWindow ?? ''} onChange={(event) => onDateWindow(event.target.value ? Number(event.target.value) as DateWindow : null)} aria-label="Filter orders by date">
+              <option value="">Any time</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="60">Last 60 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+          </label>
+          <label className="retailer-filter sort-filter">
+            <span>Sort</span>
+            <select value={sortDirection} onChange={(event) => onSortDirection(event.target.value as SortDirection)} aria-label="Sort orders by date">
+              <option value="desc">Newest first</option>
+              <option value="asc">Oldest first</option>
+            </select>
+          </label>
+          <label className="archived-toggle">
+            <input type="checkbox" checked={showArchived} onChange={(event) => onShowArchived(event.target.checked)} />
+            <span>Show archived</span>
+          </label>
           <label className="search-field order-search">
             <Search size={17} />
             <input
@@ -116,7 +153,7 @@ export function OrdersTable({
             <tr>
               <th>Store</th>
               <th>Order</th>
-              <th className="sorted-column">Ordered <ArrowDown size={13} /></th>
+              <th className="sorted-column">Ordered {sortDirection === 'desc' ? <ArrowDown size={13} /> : <ArrowUp size={13} />}</th>
               <th>Purchase total</th>
               <th>Fee basis</th>
               <th>Service fee</th>
@@ -141,6 +178,15 @@ export function OrdersTable({
                 <td className="order-number">
                   <span>{order.orderNumber}</span>
                   {order.trackingNumber && <small className="order-tracking-inline">{order.carrier ?? 'Tracking'} · {maskTracking(order.trackingNumber)}</small>}
+                  <details className="order-row-menu" onClick={(event) => event.stopPropagation()}>
+                    <summary aria-label={`Actions for order ${order.orderNumber}`}><MoreHorizontal size={16} /></summary>
+                    <div className="order-row-menu-popover">
+                      <button type="button" onClick={() => onArchive(order)}>
+                        {order.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                        {order.isArchived ? 'Restore order' : 'Archive order'}
+                      </button>
+                    </div>
+                  </details>
                 </td>
                 <td>{formatDate(order.orderedAt)}</td>
                 <td>{formatMoney(order.totalCents, order.currency)}</td>

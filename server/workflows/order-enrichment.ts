@@ -24,6 +24,8 @@ export interface OrderItemReviewInput {
   receivedAt: Date;
   bodyExcerpt: string;
   deterministicItems?: readonly ParsedOrderItem[];
+  /** Compact operator corrections for this retailer; never raw email text. */
+  feedbackExamples?: readonly { itemName: string; quantity: number | null }[];
   repairAttempt?: number;
   repairFeedback?: string;
 }
@@ -154,6 +156,7 @@ export function buildRedactedItemReviewInput(input: {
   merchant: string;
   orderNumber: string | null;
   deterministicItems?: readonly ParsedOrderItem[];
+  feedbackExamples?: readonly { itemName: string; quantity: number | null }[];
   repairAttempt?: number;
   repairFeedback?: string;
 }): OrderItemReviewInput {
@@ -165,6 +168,7 @@ export function buildRedactedItemReviewInput(input: {
     merchant: input.merchant.slice(0, 120),
     orderNumber: input.orderNumber,
     deterministicItems: input.deterministicItems,
+    feedbackExamples: input.feedbackExamples,
     repairAttempt: input.repairAttempt,
     repairFeedback: input.repairFeedback,
     receivedAt: input.receivedAt,
@@ -179,6 +183,9 @@ function redactMailboxText(value: string): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => !/(?:app\s+password|password|passcode|credit\s+card|card\s+(?:ending|number)|cvv|security\s+code|billing\s+address|shipping\s+address)/i.test(line))
+    .filter((line) => !/(?:^|,)\s*\d{1,6}\s+[^,]+\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|unit|suite|apt\.?)\b/i.test(line))
+    .filter((line) => !/,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(line))
+    .filter((line) => !/^(?:delivers?|delivered|ships?|shipping|delivery)\s+to\b/i.test(line))
     .join('\n')
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi, '[redacted-email]')
     .replace(/(?:\+?\d[\d\s().-]{8,}\d)/g, '[redacted-phone]')

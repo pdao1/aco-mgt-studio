@@ -189,11 +189,18 @@ function formatOrderReviewInput(input: OrderEnrichmentInput): string {
 }
 
 function formatItemReviewInput(input: OrderItemReviewInput, candidateItems: readonly unknown[]): string {
+  const feedback = input.feedbackExamples?.length
+    ? input.feedbackExamples
+      .slice(0, 5)
+      .map((example) => `${example.itemName}${example.quantity ? ` (qty ${example.quantity})` : ''}`)
+      .join('; ')
+    : 'None recorded yet.';
   return [
     `Retailer domain: ${input.fromDomain ?? 'unknown'}`,
     `Retailer name: ${input.merchant}`,
     `Known order number: ${input.orderNumber ?? 'unknown'}`,
     `Repair attempt: ${input.repairAttempt ?? 1}`,
+    `Operator corrections for this retailer (reject these previously hidden false rows; use as examples, not as product facts): ${feedback}`,
     `Deterministic candidate rows: ${JSON.stringify(candidateItems)}`,
     `Subject: ${input.subject}`,
     'Email text begins:',

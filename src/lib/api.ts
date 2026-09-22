@@ -55,6 +55,12 @@ export const api = {
   updateOrderOverride: (orderId: string, status: OrderOverrideUpdate['status'], note: string | null) => request<OrderOverrideUpdate>(`/api/orders/${orderId}/override`, {
     method: 'PATCH', body: JSON.stringify({ status, note }),
   }),
+  archiveOrder: (orderId: string, archived: boolean) => request<{ orderId: string; isArchived: boolean }>(`/api/orders/${orderId}/archive`, {
+    method: 'PATCH', body: JSON.stringify({ archived }),
+  }),
+  hideOrderItem: (orderId: string, itemIndex: number, hidden: boolean) => request<{ orderId: string; itemIndex: number; hidden: boolean }>(`/api/orders/${orderId}/items/${itemIndex}/visibility`, {
+    method: 'PATCH', body: JSON.stringify({ hidden }),
+  }),
   createInvoice: (customerId: string, input: CreateInvoiceInput) => request<{ invoice: Invoice }>(`/api/customers/${customerId}/invoices`, {
     method: 'POST',
     headers: { 'Idempotency-Key': crypto.randomUUID() },

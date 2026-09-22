@@ -6,7 +6,7 @@ import { ConnectCustomerDrawer } from './components/ConnectCustomerDrawer';
 import { CustomerRail } from './components/CustomerRail';
 import { LoginScreen } from './components/LoginScreen';
 import { OrderInspector } from './components/OrderInspector';
-import { OrdersTable, type OrderFilter } from './components/OrdersTable';
+import { OrdersTable, type DateWindow, type OrderFilter, type SortDirection } from './components/OrdersTable';
 import { OverviewView } from './components/OverviewView';
 import { Sidebar, type NavSection } from './components/Sidebar';
 import { SettingsView } from './components/SettingsView';
@@ -28,6 +28,9 @@ export default function App() {
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [query, setQuery] = useState('');
   const [retailer, setRetailer] = useState('');
+  const [dateWindow, setDateWindow] = useState<DateWindow>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [showArchived, setShowArchived] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [nav, setNav] = useState<NavSection>('overview');
   const [savingFeeOrderId, setSavingFeeOrderId] = useState<string | null>(null);
@@ -88,10 +91,21 @@ export default function App() {
     () => data?.orders.filter((order) => order.customerId === selectedCustomerId) ?? [],
     [data, selectedCustomerId],
   );
-  const retailerOrders = useMemo(() => filterOrders(customerOrders, { retailer }), [customerOrders, retailer]);
+  const activeCustomerOrders = useMemo(() => customerOrders.filter((order) => !order.isArchived), [customerOrders]);
+  const ordersInScope = useMemo(() => (showArchived ? customerOrders : activeCustomerOrders), [activeCustomerOrders, customerOrders, showArchived]);
+  const dateScopedOrders = useMemo(() => {
+    const cutoff = dateWindow === null ? null : Date.now() - dateWindow * 86_400_000;
+    return [...ordersInScope]
+      .filter((order) => cutoff === null || new Date(order.orderedAt).getTime() >= cutoff)
+      .sort((left, right) => {
+        const difference = new Date(left.orderedAt).getTime() - new Date(right.orderedAt).getTime();
+        return sortDirection === 'asc' ? difference : -difference;
+      });
+  }, [dateWindow, ordersInScope, sortDirection]);
+  const retailerOrders = useMemo(() => filterOrders(activeCustomerOrders, { retailer }), [activeCustomerOrders, retailer]);
   const filteredOrders = useMemo(
-    () => filterOrders(customerOrders, { status: filter, query, retailer }),
-    [customerOrders, filter, query, retailer],
+    () => filterOrders(dateScopedOrders, { status: filter, query, retailer }),
+    [dateScopedOrders, filter, query, retailer],
   );
   const selectedOrder = customerOrders.find((order) => order.id === selectedOrderId) ?? null;
 
@@ -107,6 +121,9 @@ export default function App() {
     setFilter('all');
     setQuery('');
     setRetailer('');
+    setDateWindow(null);
+    setSortDirection('desc');
+    setShowArchived(false);
     setNav('customers');
   };
 
@@ -116,6 +133,9 @@ export default function App() {
     setFilter('all');
     setQuery('');
     setRetailer('');
+    setDateWindow(null);
+    setSortDirection('desc');
+    setShowArchived(false);
     setNav('customers');
   };
 
@@ -149,6 +169,21 @@ export default function App() {
     } finally {
       setSavingOverrideOrderId(null);
     }
+  };
+
+  const archiveOrder = async (order: Order) => {
+    await api.archiveOrder(order.id, !order.isArchived);
+    if (selectedOrderId === order.id && !order.isArchived) setSelectedOrderId(null);
+    await refresh();
+    setToast(order.isArchived ? 'Order restored to active calculations.' : 'Order archived from active calculations.');
+    window.setTimeout(() => setToast(''), 4200);
+  };
+
+  const hideOrderItem = async (orderId: string, itemIndex: number, hidden: boolean) => {
+    await api.hideOrderItem(orderId, itemIndex, hidden);
+    await refresh();
+    setToast(hidden ? 'Item hidden and correction recorded for parser improvement.' : 'Item restored and correction recorded.');
+    window.setTimeout(() => setToast(''), 4200);
   };
 
   const sharePortal = async () => {
@@ -277,7 +312,7 @@ export default function App() {
 
       <section className={`workspace ${nav}-workspace`}>
         {nav === 'overview' && <OverviewView customers={data.customers} orders={data.orders} onOpenCustomer={openCustomerOrder} />}
-        {nav === 'billing' && <BillingView customer={selectedCustomer} orders={customerOrders} invoices={billing.invoices} onCreateInvoice={createInvoice} onIssueInvoice={issueInvoice} />}
+        {nav === 'billing' && <BillingView customer={selectedCustomer} orders={activeCustomerOrders} invoices={billing.invoices} onCreateInvoice={createInvoice} onIssueInvoice={issueInvoice} />}
         {nav === 'settings' && <SettingsView settings={data.workspace.settings} workspaceSlug={data.workspace.slug} onSave={saveSettings} onChangePassword={api.changePassword} />}
         {nav === 'customers' && (selectedCustomer ? (
           <>
@@ -316,7 +351,7 @@ export default function App() {
             <SummaryStrip orders={retailerOrders} activeStatus={filter} onSelect={setFilter} />
             <OrdersTable
               orders={filteredOrders}
-              allOrders={customerOrders}
+              allOrders={dateScopedOrders}
               filter={filter}
               query={query}
               retailer={retailer}
@@ -325,6 +360,13 @@ export default function App() {
               onQuery={setQuery}
               onRetailer={setRetailer}
               onSelect={selectOrder}
+              dateWindow={dateWindow}
+              sortDirection={sortDirection}
+              showArchived={showArchived}
+              onDateWindow={setDateWindow}
+              onSortDirection={setSortDirection}
+              onShowArchived={setShowArchived}
+              onArchive={(order) => void archiveOrder(order)}
             />
           </>
         ) : (
@@ -343,6 +385,7 @@ export default function App() {
           onClose={() => setSelectedOrderId(null)}
           onFeeSave={updateOrderFee}
           onOverrideSave={updateOrderOverride}
+          onHideItem={hideOrderItem}
           savingFee={savingFeeOrderId === selectedOrder.id}
           savingOverride={savingOverrideOrderId === selectedOrder.id}
         />
