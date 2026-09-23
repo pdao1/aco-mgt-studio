@@ -1,12 +1,12 @@
-# ACO Studio
+# Order Tracker Pro
 
-ACO Studio serves two independent products on a shared email, parsing, order, and tracking core: **ACOs** manage client orders and service-fee invoices in company workspaces; **Solo Buyers** connect their own Gmail inboxes to a private purchase dashboard with no client management or invoicing.
+Order Tracker Pro serves two independent products on a shared email, parsing, order, and tracking core: **ACOs** manage client orders and service-fee invoices in company workspaces; **Solo Buyers** connect their own Gmail inboxes to a private purchase dashboard with no client management or invoicing.
 
 Solo Buyers enter at `/customer` and sign in with an individual product serial or linked Discord account. Their dashboard lives at `/customer/<discord-username>` (a reserved personal handle before Discord is linked). ACOs continue using `/app` and their existing customer portals. See [Solo Buyer setup](docs/solo-buyers.md) and [carrier credentials and access](docs/tracking-setup.md).
 
 ## What is implemented
 
-- Separate Solo Buyer accounts, hashed individual serials, Discord OAuth sign-in/linking, access expiry, mailbox limits, and isolated sessions. The personal dashboard combines inboxes, purchase totals by currency, items, shipment updates, search, filters, and eight themes without exposing ACO invoice or fee fields.
+- Separate Solo Buyer accounts, hashed individual serials, Discord OAuth sign-in/linking, access expiry, mailbox limits, and isolated sessions. The personal dashboard combines inboxes, purchase totals by currency, items, shipment updates, search, filters, and eight themes without exposing ACO invoice or fee fields. Parser corrections stay redacted; only generic template-noise patterns can improve reviews across retailer workspaces.
 - Customer-by-customer order dashboards with status totals, search, filters, tracking links, and an event timeline.
 - A compact operator surface: Overview, Customers, Billing, and per-ACO Settings. Orders and shipments stay inside a customer view instead of becoming separate navigation tabs.
 - Gmail app-password verification before a mailbox is saved.
@@ -52,7 +52,7 @@ repeated `/api` proxy errors.
 
 The local Docker database uses host port `55432` so it does not collide with a
 native PostgreSQL installation on the standard port `5432`.
-Open `http://127.0.0.1:5173/app`, enter `SERVICE_SERIAL` from `.env`, then choose **New company? Create a workspace**. Choose a unique workspace ID, company name, and password (at least 12 characters). ACO Studio starts empty and only shows customers and orders that have been
+Open `http://127.0.0.1:5173/app`, enter `SERVICE_SERIAL` from `.env`, then choose **New company? Create a workspace**. Choose a unique workspace ID, company name, and password (at least 12 characters). Order Tracker Pro starts empty and only shows customers and orders that have been
 connected and synchronized.
 
 Use `npm run dev:web` only when an API is already running on port 3001. It
@@ -138,7 +138,7 @@ the included `Dockerfile` remains an optional local or reproducible-container
 deployment path.
 
 1. Set `SERVICE_SERIAL` to a long unique value. Each company creates its own workspace password in the app.
-2. Set `APP_ORIGIN` to the final HTTPS origin, for example `https://aco-studio.onrender.com`.
+2. Set `APP_ORIGIN` to the final HTTPS origin, for example `https://ordertracker.pro`.
 3. Keep the generated `MAILBOX_ENCRYPTION_KEY`, `SESSION_SECRET`, and `PORTAL_SECRET` permanently. Losing or rotating the mailbox key without a migration makes existing mailbox secrets unreadable; rotating the portal key invalidates existing customer links.
 4. Deploy, check `/api/health`, activate the service with `SERVICE_SERIAL`, sign in, set each order's fee percentage in the inspector, and copy a static customer portal link.
 5. Optionally set `OPENAI_KEY` to enable the bounded item-row quality pass. The default `OPENAI_MODEL=gpt-5-nano` and `OPENAI_MAX_REVIEWS_PER_SYNC=25` keep it limited; leave the key blank for deterministic-only operation.

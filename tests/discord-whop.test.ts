@@ -17,7 +17,7 @@ import { WHOP_API_VERSION, WhopService, verifyWhopEvent } from '../server/billin
 vi.mock('../server/solo/discord.js',()=>({exchangeDiscordCode:vi.fn()}));
 const realFetch=globalThis.fetch;
 const config=loadConfig({DATABASE_URL:'postgres://unused/test',MAILBOX_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64'),SESSION_SECRET:'identity-test-secret-long-enough',PORTAL_SECRET:'portal-test-secret-long-enough',SERVICE_SERIAL:'service-test-serial',
-  APP_ORIGIN:'https://aco-studio.onrender.com',DISCORD_REDIRECT_URI:'https://aco-studio.onrender.com/oauth/discord',DISCORD_CLIENT_ID:'discord-client',DISCORD_CLIENT_SECRET:'discord-secret',
+  APP_ORIGIN:'https://ordertracker.pro',DISCORD_REDIRECT_URI:'https://ordertracker.pro/oauth/discord',DISCORD_CLIENT_ID:'discord-client',DISCORD_CLIENT_SECRET:'discord-secret',
   WHOP_API_KEY:'test-key',WHOP_WEBHOOK_SECRET:'ws_test_signing_secret',WHOP_ACCOUNT_ID:'biz_ours',WHOP_SOLO_PRODUCT_ID:'prod_solo',WHOP_ACO_PRODUCT_ID:'prod_aco'});
 function signedEvent(id:string,membership='mem_solo',type='membership.activated') {
   const raw=Buffer.from(JSON.stringify({id,type,account_id:'biz_ours',api_version:'v1',api_version_date:WHOP_API_VERSION,data:{id:membership}}));
@@ -69,8 +69,8 @@ describe('Discord binding and Whop provisioning (embedded PostgreSQL + HTTP)',()
     return callback;
   }
   it('validates the supplied callback URI and rejects foreign callback origins',()=>{
-    expect(config.discordRedirectUri).toBe('https://aco-studio.onrender.com/oauth/discord');
-    expect(()=>loadConfig({DATABASE_URL:'x',MAILBOX_ENCRYPTION_KEY:'x',SESSION_SECRET:'x'.repeat(32),PORTAL_SECRET:'x'.repeat(32),SERVICE_SERIAL:'x'.repeat(20),APP_ORIGIN:'https://aco-studio.onrender.com',DISCORD_REDIRECT_URI:'https://attacker.example/callback'})).toThrow('DISCORD_REDIRECT_URI');
+    expect(config.discordRedirectUri).toBe('https://ordertracker.pro/oauth/discord');
+    expect(()=>loadConfig({DATABASE_URL:'x',MAILBOX_ENCRYPTION_KEY:'x',SESSION_SECRET:'x'.repeat(32),PORTAL_SECRET:'x'.repeat(32),SERVICE_SERIAL:'x'.repeat(20),APP_ORIGIN:'https://ordertracker.pro',DISCORD_REDIRECT_URI:'https://attacker.example/callback'})).toThrow('DISCORD_REDIRECT_URI');
   });
   it('requires verified Discord state before linking, with no free service for new identities',async()=>{
     expect((await request('/api/auth/link','',{product:'solo',serial:'solo_unverified_token'})).status).toBe(401);
@@ -81,7 +81,7 @@ describe('Discord binding and Whop provisioning (embedded PostgreSQL + HTTP)',()
     expect((await request('/protected/solo',cookieFrom(signedIn))).status).toBe(401);
   });
   it('binds a Solo serial once, remembers the destination, and prevents another Discord account claiming it',async()=>{
-    const provisioned=await solo.provision({handle:'manual-buyer',displayName:'Buyer',discordId:null,days:30,mailboxLimit:5});
+    const provisioned=await solo.provision({handle:'manual-buyer',displayName:'Buyer',discordId:null,days:30,mailboxLimit:2});
     const pending=cookieFrom(await login(buyer));
     const linked=await request('/api/auth/link',pending,{product:'solo',serial:provisioned.serial});
     expect(linked.status).toBe(200);expect(await linked.json()).toEqual({path:'/customer/manual-buyer'});
@@ -120,7 +120,7 @@ describe('Discord binding and Whop provisioning (embedded PostgreSQL + HTTP)',()
   it('automatically creates paid Solo access from the verified membership and Discord connection',async()=>{
     remoteMemberships={mem_solo:membership('mem_solo','prod_solo','user_solo')};remoteDiscord={user_solo:whopBuyer};mockWhop();
     expect(await whop.processOne()).toBe(true);
-    const service=await identities.resolve(whopBuyer.id);expect(service?.product).toBe('solo');expect(service?.solo?.mailboxLimit).toBe(5);
+    const service=await identities.resolve(whopBuyer.id);expect(service?.product).toBe('solo');expect(service?.solo?.mailboxLimit).toBe(2);
     const duplicate=signedEvent('event-2');await whop.receive(duplicate.raw,duplicate.headers);await whop.processOne();
     expect((await db.query('SELECT * FROM solo_accounts WHERE discord_id=$1',[whopBuyer.id])).rows).toHaveLength(1);
     vi.unstubAllGlobals();

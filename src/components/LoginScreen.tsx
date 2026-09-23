@@ -26,7 +26,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   };
 
   return <main className="login-screen"><section className="login-panel">
-    <div className="login-brand"><Boxes size={21} /> ACO Studio</div>
+    <div className="login-brand"><Boxes size={21} /> Order Tracker Pro</div>
     <div className="login-copy"><LockKeyhole size={24} /><h1>{creating ? 'Create your workspace' : 'Operator sign in'}</h1>
       <p>{creating ? 'Set up a private workspace for your ACO company.' : 'Sign in with your company’s workspace ID and password.'}</p></div>
     <form onSubmit={submit}>

@@ -27,7 +27,7 @@ services:
       - key: DISCORD_CLIENT_SECRET
         sync: false
       - key: DISCORD_REDIRECT_URI
-        value: https://aco-studio.onrender.com/oauth/discord
+        value: https://ordertracker.pro/oauth/discord
       - key: WHOP_API_KEY
         sync: false
       - key: WHOP_WEBHOOK_SECRET
@@ -39,7 +39,7 @@ services:
       - key: WHOP_ACO_PRODUCT_ID
         value: prod_SiiEh8TDBF2nk
       - key: WHOP_SOLO_MAILBOX_LIMIT
-        value: "5"
+        value: "2"
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
@@ -79,7 +79,7 @@ services:
       - key: UPS_CLIENT_SECRET
         sync: false
       - key: UPS_TRANSACTION_SRC
-        value: aco-studio
+        value: ordertracker-pro
       - key: FEDEX_API_KEY
         sync: false
       - key: FEDEX_SECRET_KEY
@@ -91,7 +91,7 @@ services:
       - key: TRACKING_MAX_SHIPMENTS_PER_SYNC
         value: "100"
       - key: APP_ORIGIN
-        sync: false
+        value: https://ordertracker.pro
       - key: NODE_ENV
         value: production
       - key: SYNC_INTERVAL_MINUTES

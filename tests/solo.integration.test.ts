@@ -35,7 +35,7 @@ describe.skipIf(!url)('Solo Buyer service boundary (PostgreSQL + HTTP)',()=>{
     if(!new URL(url!).pathname.startsWith('/aco_test_'))throw new Error('Use an aco_test_ disposable database.');
     await runMigrations(url!);core=new Repository(url!);accounts=new SoloRepository(core);
     first=await accounts.provision({handle,displayName:'Solo One',discordId:null,days:30,mailboxLimit:1});
-    second=await accounts.provision({handle:`other-${suffix}`,displayName:'Solo Two',discordId:null,days:30,mailboxLimit:5});
+    second=await accounts.provision({handle:`other-${suffix}`,displayName:'Solo Two',discordId:null,days:30,mailboxLimit:2});
     const config=loadConfig({DATABASE_URL:url,MAILBOX_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64'),SESSION_SECRET:'solo-integration-session-secret',PORTAL_SECRET:'solo-integration-portal-secret',SERVICE_SERIAL:'aco-platform-service-serial',DISCORD_CLIENT_ID:'test-discord-client',DISCORD_CLIENT_SECRET:'test-discord-secret'});
     const provider=new CompositeCarrierTrackingProvider([]);
     const app=express();app.use(express.json(),cookieParser());
@@ -65,7 +65,7 @@ describe.skipIf(!url)('Solo Buyer service boundary (PostgreSQL + HTTP)',()=>{
     const stored=(await core.getMailbox(account!.workspaceId,mailbox.id))!;
     expect(stored.secretCiphertext).not.toContain('abcdefghijklmnop');
     expect(secretBox.decrypt(stored.secretCiphertext)).toBe('abcdefghijklmnop');
-    const otherMailbox=await core.createCustomer(other!.workspaceId,{name:'Other inbox',gmailAddress:`other-${suffix}@gmail.com`,syncDays:30,secretCiphertext:secretBox.encrypt('qrstuvwxyzabcdef')},5);
+    const otherMailbox=await core.createCustomer(other!.workspaceId,{name:'Other inbox',gmailAddress:`other-${suffix}@gmail.com`,syncDays:30,secretCiphertext:secretBox.encrypt('qrstuvwxyzabcdef')},2);
     const parsed:ParsedOrderEmail={messageKey:randomUUID(),merchant:'Pokemon Center',orderNumber:'MY-ORDER-1001',status:'shipped',totalCents:5999,currency:'USD',trackingNumber:'1Z9999999999999999',carrier:'UPS',trackingUrl:'https://www.ups.com/track?tracknum=1Z9999999999999999',expectedDelivery:null,orderedAt:new Date(),itemCount:1,items:[{name:'Elite Trainer Box',quantity:1,unitPriceCents:5999,totalCents:5999}]};
     const meta={messageKey:parsed.messageKey,fromAddress:'orders@example.com',subject:'Order shipped',receivedAt:parsed.orderedAt};
     await core.recordMessage(account!.workspaceId,mailbox.id,meta,parsed);

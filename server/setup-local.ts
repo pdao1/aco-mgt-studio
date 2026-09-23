@@ -43,7 +43,7 @@ if (existsSync(envPath)) {
     'USPS_CLIENT_SECRET=',
     'UPS_CLIENT_ID=',
     'UPS_CLIENT_SECRET=',
-    'UPS_TRANSACTION_SRC=aco-studio',
+    'UPS_TRANSACTION_SRC=ordertracker-pro',
     'FEDEX_API_KEY=',
     'FEDEX_SECRET_KEY=',
     'FEDEX_ACCOUNT_NUMBER=',

@@ -6,7 +6,7 @@ The shared tracking service supports UPS, USPS, and FedEx for both ACO and Solo 
 
 | Carrier | Where to get access | Server environment variables |
 | --- | --- | --- |
-| UPS | Sign in to the [UPS Developer Portal](https://developer.ups.com/), create an application, and include the Tracking API product. Complete the shipper-account/access requirements shown for your application. | `UPS_CLIENT_ID`, `UPS_CLIENT_SECRET`; optional `UPS_TRANSACTION_SRC=aco-studio` |
+| UPS | Sign in to the [UPS Developer Portal](https://developer.ups.com/), create an application, and include the Tracking API product. Complete the shipper-account/access requirements shown for your application. | `UPS_CLIENT_ID`, `UPS_CLIENT_SECRET`; optional `UPS_TRANSACTION_SRC=ordertracker-pro` |
 | USPS | Create an account/application in the [USPS API Developer Portal](https://developers.usps.com/), enroll through USPS business onboarding, and request tracking permissions appropriate to your business. The app's Consumer Key and Consumer Secret are the OAuth client ID and secret. | `USPS_CLIENT_ID`, `USPS_CLIENT_SECRET` |
 | FedEx | In the [FedEx Developer Portal](https://developer.fedex.com/), create an organization/project, include Basic Integrated Visibility (tracking), and complete the production process for your business type. Use API Key and Secret Key from the project credentials. | `FEDEX_API_KEY`, `FEDEX_SECRET_KEY`; optional `FEDEX_ACCOUNT_NUMBER` |
 
@@ -26,7 +26,7 @@ USPS_CLIENT_ID=
 USPS_CLIENT_SECRET=
 UPS_CLIENT_ID=
 UPS_CLIENT_SECRET=
-UPS_TRANSACTION_SRC=aco-studio
+UPS_TRANSACTION_SRC=ordertracker-pro
 FEDEX_API_KEY=
 FEDEX_SECRET_KEY=
 FEDEX_ACCOUNT_NUMBER=
@@ -43,7 +43,7 @@ Use the test credentials and sample tracking numbers supplied by each provider. 
 
 The endpoints used are UPS `/security/v1/oauth/token` and `/api/track/v1/details/{number}`, USPS `/oauth2/v3/token` and `/tracking/v3/tracking/{number}`, and FedEx `/oauth/token` and `/track/v1/trackingnumbers`. USPS OAuth uses JSON; UPS uses Basic authentication with a form grant; FedEx uses form client credentials. Access tokens are cached and concurrent token requests coalesced.
 
-In a Solo Buyer dashboard, **Configured** only means keys are present; it is not a successful-connection guarantee. Choose **Refresh tracking** with a shipment whose tracking number belongs to an authorized test/customer account. The dashboard shows progress, last check, and errors. Sandbox data is clearly labeled. Verify the resulting status, delivery date, and timeline against the carrier's own tracking page before customer rollout.
+Tracking refreshes run after an inbox sync and on the server's scheduled tracking interval. Verify the resulting status, delivery date, and timeline against the carrier's own tracking page before customer rollout.
 
 Requests time out after eight seconds. Manual refreshes have a per-account cooldown of one minute. Scheduled checks default to 30 minutes and 100 active shipments per account. Delivered and cancelled shipments stop polling. Missing credentials, unsupported carriers, or carrier errors preserve existing email-derived order facts and links. API quotas and pricing are governed by each provider agreement, not by these local limits.
 

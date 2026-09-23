@@ -56,7 +56,7 @@ function IdentityLogin({state}:{state:IdentityState}) {
     catch {setError('Sign out failed. Please try again.');setBusy(false);}
   }
   return <main className="identity-screen"><section className="identity-panel">
-    <a href="/" className="identity-brand"><Boxes size={23}/> ACO Studio</a>
+    <a href="/" className="identity-brand"><Boxes size={23}/> Order Tracker Pro</a>
     <div className="identity-steps"><span className={!linkedIdentity?'current':''}>1 · Discord</span><span className={linkedIdentity?'current':''}>2 · Your service</span></div>
     <h1>{linkedIdentity?'Connect your service':'Welcome back.'}</h1>
     <p>{linkedIdentity?`Signed in as @${state.username}. Link your existing service once, or continue after your Whop purchase.`:'Sign in with Discord to open your personal orders or ACO workspace.'}</p>

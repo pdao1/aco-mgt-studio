@@ -46,7 +46,7 @@ describe('Solo Buyer identity and purchase totals',()=>{
   });
   it('keeps currencies separate and excludes cancellations and unknown totals from spending',()=>{
     const orders=[{currency:'USD',totalCents:1000,status:'delivered'},{currency:'CAD',totalCents:2500,status:'shipped'},{currency:'USD',totalCents:9000,status:'cancelled'},{currency:'USD',totalCents:null,status:'pending'}] as SoloOrder[];
-    expect(summarizePurchases(orders)).toEqual({count:4,inTransit:1,delivered:1,totals:[['USD',1000],['CAD',2500]],unknownTotal:1});
+    expect(summarizePurchases(orders)).toEqual({count:4,cancelled:1,inTransit:1,delivered:1,totals:[['USD',1000],['CAD',2500]],unknownTotal:1,stickRate:75,cancelRate:25});
   });
   it('uses the verified Discord user ID and never returns OAuth tokens',async()=>{
     const fetchMock=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({access_token:'test-token',refresh_token:'test-refresh'})))

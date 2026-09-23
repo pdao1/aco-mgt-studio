@@ -77,7 +77,7 @@ export class UpsTrackingProvider implements CarrierTrackingProvider {
   constructor(
     private readonly clientId: string | null,
     private readonly clientSecret: string | null,
-    private readonly transactionSource = 'aco-studio',
+    private readonly transactionSource = 'ordertracker-pro',
     private readonly apiBaseUrl = 'https://onlinetools.ups.com',
   ) {
     this.configured = Boolean(clientId && clientSecret);

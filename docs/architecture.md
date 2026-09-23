@@ -1,4 +1,4 @@
-# ACO Studio architecture
+# Order Tracker Pro architecture
 
 This document is the implementation contract for the customer order, shipment,
 manual-override, and billing phase. It deliberately keeps the product small:
@@ -23,7 +23,7 @@ Stripe/Venmo payment links when configured.
 | Platform subscription | One subscribed ACO business maps to one isolated workspace/node group. Provider entitlements such as Whop are separate from downstream customer fee invoices. |
 | Async work | `MailboxSyncCoordinator` is a bounded background consumer today. It scans each customer's bounded mailbox window, fetches headers first, skips processed Message-IDs, ignores one-time PINs and oversized non-order mail, parses only messages with order/shipment signals, matches known customer order numbers, and applies updates idempotently. Prose-only order tokens are rejected and legacy artifacts are excluded from dashboard/billing reads. `orders.ingestion.v1` is the seam for a separately deployed worker or Render Workflow later. |
 | Carrier tracking | `TrackingSyncCoordinator` polls active shipment rows on a bounded interval. USPS, UPS, and FedEx adapters use server-side OAuth credentials, cache tokens, map carrier vocabulary to the canonical order status, and fail soft per shipment. Delivered/cancelled shipments are not polled again. |
-| AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. Operator archive/hide corrections are stored as redacted, workspace-scoped parser feedback, injected as compact same-retailer examples on later reviews, and exportable as JSONL for offline evals. |
+| AI | Deterministic parsing runs first and remains authoritative for merchant, order number, status, totals, tracking, and cancellation. When `OPENAI_KEY` is configured, GPT-5 nano performs a bounded, fail-soft review only for empty/suspicious item rows; structured output is validated locally before item JSON is stored. Operator archive/hide corrections are stored as redacted workspace feedback, injected as compact same-retailer examples on later reviews, and exportable as JSONL for offline evals. Only generic template-noise corrections (for example, an address row or “Delivers to”) are promoted into a privacy-safe shared parser pattern table; product names and email excerpts remain workspace-scoped. |
 | Corrections | Archived orders are excluded from active KPIs, billing, portals, and Solo summaries. Hidden line items remain restorable in the operator inspector and are excluded from visible item counts; purchase totals are not rewritten by an item-label correction. |
 | Empty state | A new installation contains no customers, orders, invoices, or sample records. |
 
@@ -127,7 +127,7 @@ Repair must be an explicit operator action, never an automatic charge.
 ## Billing and Stripe decision record
 
 The downstream user flow is operator-created service-fee invoices, not retailer
-purchase collection. Customers pay retailers with their own cards. ACO Studio
+purchase collection. Customers pay retailers with their own cards. Order Tracker Pro
 therefore uses Stripe Invoicing only for the ACO fee and never adds the order
 purchase total to the amount due. It does not collect card data. Invoice
 creation is local and draft-first. Issuing creates fee-only Stripe invoice

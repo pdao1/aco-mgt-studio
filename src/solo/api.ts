@@ -9,6 +9,9 @@ export const soloApi = {
   dashboard:()=>request<SoloDashboard>('/api/solo/dashboard'),
   connect:(input:ConnectCustomerInput)=>request('/api/solo/mailboxes',{method:'POST',body:JSON.stringify(input)}),
   sync:(id:string)=>request(`/api/solo/mailboxes/${id}/sync`,{method:'POST'}),
+  removeMailbox:(id:string)=>request(`/api/solo/mailboxes/${id}`,{method:'DELETE'}),
   track:()=>request<TrackingSummary>('/api/solo/tracking/refresh',{method:'POST'}),
+  archiveOrder:(id:string,archived:boolean)=>request(`/api/solo/orders/${id}/archive`,{method:'PATCH',body:JSON.stringify({archived})}),
+  hideOrderItem:(orderId:string,itemIndex:number,hidden:boolean)=>request(`/api/solo/orders/${orderId}/items/${itemIndex}/visibility`,{method:'PATCH',body:JSON.stringify({hidden})}),
   appearance:(input:SoloDashboard['appearance'])=>request('/api/solo/appearance',{method:'PATCH',body:JSON.stringify(input)}),
 };

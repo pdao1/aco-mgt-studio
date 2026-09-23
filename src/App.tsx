@@ -61,7 +61,7 @@ export default function App() {
       } else if (error instanceof ApiError && error.status === 401) {
         setNeedsLogin(true);
       } else {
-        setLoadError(error instanceof Error ? error.message : 'ACO Studio could not load the workspace.');
+        setLoadError(error instanceof Error ? error.message : 'Order Tracker Pro could not load the workspace.');
       }
     } finally {
       setLoading(false);
@@ -221,7 +221,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    document.title = data ? `${data.workspace.settings.displayName} | ACO Studio` : 'ACO Studio';
+    document.title = data ? `${data.workspace.settings.displayName} | Order Tracker Pro` : 'Order Tracker Pro';
   }, [data?.workspace.settings.displayName]);
 
   const saveSettings = async (settings: WorkspaceSettings) => {
@@ -398,9 +398,9 @@ export default function App() {
 }
 
 function LoadingScreen() {
-  return <main className="loading-screen"><span className="loading-mark" /><strong>Loading ACO Studio</strong></main>;
+  return <main className="loading-screen"><span className="loading-mark" /><strong>Loading Order Tracker Pro</strong></main>;
 }
 
 function WorkspaceState({ detail, onRetry }: { detail: string; onRetry: () => void }) {
-  return <main className="loading-screen workspace-error"><strong>ACO Studio could not load</strong><p>{detail}</p><button className="primary-action" onClick={onRetry}>Try again</button></main>;
+  return <main className="loading-screen workspace-error"><strong>Order Tracker Pro could not load</strong><p>{detail}</p><button className="primary-action" onClick={onRetry}>Try again</button></main>;
 }

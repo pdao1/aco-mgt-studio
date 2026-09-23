@@ -22,11 +22,11 @@ export function AccessGate({ onActivate }: { onActivate: (serial: string) => Pro
   return (
     <main className="login-screen">
       <section className="login-panel">
-        <div className="login-brand"><KeyRound size={21} /> ACO Studio</div>
+        <div className="login-brand"><KeyRound size={21} /> Order Tracker Pro</div>
         <div className="login-copy">
           <KeyRound size={24} />
           <h1>Activate your service</h1>
-          <p>Enter the serial supplied with your ACO Studio subscription.</p>
+          <p>Enter the serial supplied with your Order Tracker Pro subscription.</p>
         </div>
         <form onSubmit={submit}>
           <label>

@@ -12,3 +12,10 @@ export const WORKSPACE_THEMES: Array<{ id: WorkspaceTheme; name: string; mode: '
   { id: 'nord-dark', name: 'Nord', mode: 'dark', background: '#242c39', surface: '#2e3949', accent: '#88c0d0' },
   { id: 'dracula-dark', name: 'Dracula', mode: 'dark', background: '#20212c', surface: '#282a36', accent: '#bd93f9' },
 ];
+
+export const PRIMARY_PALETTES = [
+  { id: 'cobalt', name: 'Cobalt', light: '#1463f3', dark: '#85b7ff' },
+  { id: 'violet', name: 'Violet', light: '#7c3aed', dark: '#b4b4fc' },
+  { id: 'emerald', name: 'Emerald', light: '#0b8b5f', dark: '#74d5a6' },
+  { id: 'rose', name: 'Rose', light: '#d22f5f', dark: '#ff9ab2' },
+] as const;

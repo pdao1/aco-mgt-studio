@@ -671,7 +671,7 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 });
 
 const server = app.listen(config.port, '0.0.0.0', () => {
-  console.info(`ACO Studio listening on port ${config.port}.`);
+  console.info(`Order Tracker Pro listening on port ${config.port}.`);
 });
 
 const shutdown = async () => {

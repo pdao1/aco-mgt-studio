@@ -96,4 +96,12 @@ describe('PostgreSQL tenant and privacy schema', () => {
     expect(sql).toContain('ALTER TABLE parser_feedback FORCE ROW LEVEL SECURITY;');
     expect(sql).not.toMatch(/raw_(?:email|body|message)/i);
   });
+
+  it('caps Solo Buyer inboxes and stores only generic shared parser patterns', async () => {
+    const sql = await readFile(new URL('../server/database/migrations/013_solo_limits_feedback_patterns.sql', import.meta.url), 'utf8');
+    expect(sql).toContain('mailbox_limit BETWEEN 1 AND 2');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS parser_feedback_patterns');
+    expect(sql).toContain('REVOKE ALL ON parser_feedback_patterns FROM PUBLIC');
+    expect(sql).not.toMatch(/source_excerpt|raw_(?:email|body|message)/i);
+  });
 });

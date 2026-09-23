@@ -1005,13 +1005,29 @@ export class Repository {
         hidden ? 'hide_item' : 'restore_item', item.key, item.name, item.quantity,
         row.source_message_key, row.redacted_excerpt,
       ]);
+      if (hidden) {
+        const patternName = sharedParserPatternName(item.name);
+        if (patternName) {
+          await client.query(`
+            INSERT INTO parser_feedback_patterns(
+              merchant_key, item_name, example_quantity, hidden_count, last_seen_at
+            ) VALUES ($1, $2, $3, 1, now())
+            ON CONFLICT (merchant_key, item_name) DO UPDATE SET
+              example_quantity = COALESCE(EXCLUDED.example_quantity, parser_feedback_patterns.example_quantity),
+              hidden_count = parser_feedback_patterns.hidden_count + 1,
+              last_seen_at = now()
+          `, [row.merchant.trim().toLowerCase().slice(0, 120), patternName, item.quantity]);
+        }
+      }
       return { orderId, itemIndex, hidden };
     });
   }
 
   async listParserFeedbackExamples(workspaceId: string, merchant: string, limit = 5): Promise<ParserFeedbackExample[]> {
     return this.withWorkspace(workspaceId, async (client) => {
-      const result = await client.query<{ item_name: string; item_quantity: number | null }>(`
+      const boundedLimit = Math.min(Math.max(limit, 1), 20);
+      const [workspaceResult, sharedResult] = await Promise.all([
+        client.query<{ item_name: string; item_quantity: number | null }>(`
         SELECT item_name, item_quantity
         FROM parser_feedback
         WHERE workspace_id = $1
@@ -1020,14 +1036,24 @@ export class Repository {
           AND item_name IS NOT NULL
         ORDER BY created_at DESC
         LIMIT $3
-      `, [workspaceId, merchant, Math.min(Math.max(limit, 1), 20)]);
+      `, [workspaceId, merchant, boundedLimit]),
+        client.query<{ item_name: string; example_quantity: number | null }>(`
+          SELECT item_name, example_quantity
+          FROM parser_feedback_patterns
+          WHERE merchant_key = lower($1)
+          ORDER BY hidden_count DESC, last_seen_at DESC
+          LIMIT $2
+        `, [merchant.trim().slice(0, 120), boundedLimit]),
+      ]);
       const seen = new Set<string>();
-      return result.rows.flatMap((row) => {
+      return [...workspaceResult.rows.map((row) => ({ item_name: row.item_name, item_quantity: row.item_quantity })),
+        ...sharedResult.rows.map((row) => ({ item_name: row.item_name, item_quantity: row.example_quantity }))]
+        .flatMap((row) => {
         const key = `${row.item_name.toLowerCase()}\0${row.item_quantity ?? ''}`;
         if (seen.has(key)) return [];
         seen.add(key);
         return [{ itemName: row.item_name, quantity: row.item_quantity }];
-      });
+        }).slice(0, boundedLimit);
     });
   }
 
@@ -1109,6 +1135,17 @@ export class Repository {
         lastSyncedAt: null,
         syncMessage: null,
       };
+    });
+  }
+
+  async removeCustomer(workspaceId: string, customerId: string): Promise<boolean> {
+    return this.withWorkspace(workspaceId, async (client) => {
+      const result = await client.query<{ id: string }>(`
+        DELETE FROM customers
+        WHERE workspace_id = $1 AND id = $2
+        RETURNING id
+      `, [workspaceId, customerId]);
+      return Boolean(result.rows[0]);
     });
   }
 
@@ -1549,6 +1586,24 @@ function isStoredNonProductName(value: string): boolean {
   return /https?:\/\/|www\.|\b(?:href|qs)=|click\.oe\.target\.com/i.test(name)
     || /^(?:view\s+(?:order|cart|details?)(?:\s+(?:order|cart|details?))?|order\s+(?:details|summary)|cancel(?:led|ed)\s+item|more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?)$/i.test(name)
     || /^(?:video\s+)?games?|toys?(?:\s*&\s*games)?$/i.test(name);
+}
+
+/**
+ * Only promote generic template noise into the cross-workspace parser memory.
+ * Product names remain workspace-scoped feedback, and address-like values are
+ * replaced with a stable placeholder so this table cannot become a PII index.
+ */
+function sharedParserPatternName(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/g, ' ').slice(0, 240);
+  if (!normalized) return null;
+  if (/\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|way|highway|hwy\.?|unit|apt|#)\b.*\b\d{5}(?:-\d{4})?\b/i.test(normalized)
+    || /\b\d{1,6}\s+[\w .'-]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(normalized)) {
+    return '[address line]';
+  }
+  if (/^(?:delivers?\s+to|delivery(?:\s+address)?|shipping(?:\s+address)?|billing(?:\s+address)?|recipient|order\s+timeline|order\s+details?|purchase\s+total|status|placed)$/i.test(normalized)) {
+    return normalized.toLowerCase();
+  }
+  return null;
 }
 
 function resolveFeeBasisCents(

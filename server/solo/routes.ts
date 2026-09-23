@@ -98,7 +98,7 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
       const data=await repository.dashboard(account.workspaceId,null);
       response.json({account:{handle:account.handle,displayName:account.displayName,discordLinked:Boolean(account.discordId),discordAvailable:discordReady,accessExpiresAt:account.accessExpiresAt,mailboxLimit:account.mailboxLimit},
         appearance:{theme:data.workspace.settings.theme,accentColor:data.workspace.settings.accentColor},mailboxes:data.customers,
-        orders:data.orders.filter(order=>!order.isArchived).map(({feePercent,feeBasis,customBasisCents,feeBasisCents,feeCents,billingStatus,invoiceId,...order})=>order),
+        orders:data.orders.map(({feePercent,feeBasis,customBasisCents,feeBasisCents,feeCents,billingStatus,invoiceId,...order})=>order),
         tracking:{providers:trackingProvider.availability(),environment:config.trackingEnvironment,...coordinators(account.workspaceId).tracking.summary},
       });
     } catch(error){next(error);}
@@ -125,6 +125,34 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
       const id=request.params.id as string, account=request.soloAccount!;
       if (!await repository.getMailbox(account.workspaceId,id)) {response.status(404).json({message:'Mailbox not found.'});return;}
       coordinators(account.workspaceId).mailbox.enqueue(id,{fullHistory:true});response.status(202).json({accepted:true});
+    } catch(error){next(error);}
+  });
+  router.delete('/mailboxes/:id',async(request,response,next)=>{
+    if (!z.string().uuid().safeParse(request.params.id).success) {response.status(404).json({message:'Mailbox not found.'});return;}
+    try {
+      const removed=await repository.removeCustomer(request.soloAccount!.workspaceId,request.params.id);
+      if(!removed){response.status(404).json({message:'Mailbox not found.'});return;}
+      response.json({ok:true});
+    } catch(error){next(error);}
+  });
+  const archiveSchema=z.object({archived:z.boolean()}).strict();
+  router.patch('/orders/:orderId/archive',async(request,response,next)=>{
+    const parsed=archiveSchema.safeParse(request.body);
+    if(!parsed.success||!z.string().uuid().safeParse(request.params.orderId).success){response.status(400).json({message:'That archive request is invalid.'});return;}
+    try {
+      const result=await repository.archiveOrder(request.soloAccount!.workspaceId,request.params.orderId,parsed.data.archived);
+      if(!result){response.status(404).json({message:'Order not found.'});return;}
+      response.json(result);
+    } catch(error){next(error);}
+  });
+  const itemVisibilitySchema=z.object({hidden:z.boolean()}).strict();
+  router.patch('/orders/:orderId/items/:itemIndex/visibility',async(request,response,next)=>{
+    const parsed=itemVisibilitySchema.safeParse(request.body), itemIndex=Number.parseInt(request.params.itemIndex,10);
+    if(!parsed.success||!z.string().uuid().safeParse(request.params.orderId).success||!/^[0-9]+$/.test(request.params.itemIndex)||!Number.isSafeInteger(itemIndex)||itemIndex>49){response.status(400).json({message:'That item visibility request is invalid.'});return;}
+    try {
+      const result=await repository.hideOrderItem(request.soloAccount!.workspaceId,request.params.orderId,itemIndex,parsed.data.hidden);
+      if(!result){response.status(404).json({message:'That order item was not found.'});return;}
+      response.json(result);
     } catch(error){next(error);}
   });
   router.post('/tracking/refresh',async(request,response,next)=>{

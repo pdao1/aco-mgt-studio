@@ -1,6 +1,6 @@
 # Customer access and Solo Buyer service
 
-ACO Studio uses one shared Discord identity flow for both products. A user can
+Order Tracker Pro uses one shared Discord identity flow for both products. A user can
 sign in with Discord first and then link an existing service, or sign in to an
 existing Solo service with its serial and link Discord from the dashboard. A
 verified Whop purchase can also provision access automatically.
@@ -12,10 +12,10 @@ OAuth token is stored in the browser.
 Set these Render environment variables:
 
 ```text
-APP_ORIGIN=https://aco-studio.onrender.com
+APP_ORIGIN=https://ordertracker.pro
 DISCORD_CLIENT_ID=<Discord application client ID>
 DISCORD_CLIENT_SECRET=<Discord application client secret>
-DISCORD_REDIRECT_URI=https://aco-studio.onrender.com/oauth/discord
+DISCORD_REDIRECT_URI=https://ordertracker.pro/oauth/discord
 WHOP_API_KEY=<Whop API key>
 WHOP_WEBHOOK_SECRET=<Whop webhook signing secret, including the ws_ prefix>
 WHOP_ACCOUNT_ID=biz_1HjUYXgisSyf7z
@@ -32,7 +32,8 @@ Render secret values. Do not put them in Vite variables or commit them.
 Create or open the Discord application, then add this exact OAuth2 redirect:
 
 ```text
-https://aco-studio.onrender.com/oauth/discord
+https://ordertracker.pro/oauth/discord
+https://ordertracker.pro/api/solo/auth/discord/callback
 ```
 
 Select only the `identify` OAuth scope. This application uses Discord to
@@ -50,7 +51,7 @@ state cookie, and a server-side code exchange. See Discord's
 In Whop, configure the webhook endpoint:
 
 ```text
-https://aco-studio.onrender.com/api/whop/webhook
+https://ordertracker.pro/api/whop/webhook
 ```
 
 Send the membership and payment events needed for access reconciliation:
