@@ -657,6 +657,7 @@ if (existsSync(distDirectory)) {
   app.use(express.static(distDirectory, { index: false, maxAge: config.nodeEnv === 'production' ? '1h' : 0 }));
   app.use((request, response, next) => {
     if (request.method === 'GET' && request.accepts('html')) {
+      response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       response.sendFile(join(distDirectory, 'index.html'));
       return;
     }

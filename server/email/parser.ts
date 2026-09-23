@@ -68,8 +68,25 @@ const orderPatterns = [
 const trackingPatterns: Array<{ carrier: string; pattern: RegExp; capture?: number; url: (value: string) => string | null }> = [
   { carrier: 'UPS', pattern: /\b1Z[A-Z0-9]{16}\b/i, url: (value) => `https://www.ups.com/track?tracknum=${encodeURIComponent(value)}` },
   { carrier: 'Amazon Logistics', pattern: /\bTBA\d{10,15}\b/i, url: () => null },
-  { carrier: 'USPS', pattern: /\b(?:9[2345]\d{18,20}|[A-Z]{2}\d{9}US)\b/i, url: (value) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(value)}` },
-  { carrier: 'FedEx', pattern: /(?:tracking\s*(?:number|no\.?|#)?|fedex)[^\d]{0,24}(\d{12}|\d{15}|\d{20}|\d{22})\b/i, capture: 1, url: (value) => `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(value)}` },
+  // International USPS identifiers have an unambiguous shape. Long numeric
+  // USPS identifiers need nearby carrier/tracking context because retailer
+  // order numbers can use the same 20-22 digit range.
+  { carrier: 'USPS', pattern: /\b[A-Z]{2}\d{9}US\b/i, url: (value) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(value)}` },
+  { carrier: 'USPS', pattern: /(?:\b(?:USPS|United States Postal Service)\b[^\r\n]{0,24})?\btracking\s*(?:number|no\.?|#|id)?\s*[:#-]?\s*(9[2345]\d{18,20})\b/i, capture: 1, url: (value) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(value)}` },
+  // A bare 12-22 digit value is not enough to identify FedEx; require an
+  // explicit tracking label so an order/reference number is not promoted.
+  { carrier: 'FedEx', pattern: /\btracking\s*(?:number|no\.?|#|id)?\s*[:#-]?\s*(\d{12}|\d{15}|\d{20}|\d{22})\b/i, capture: 1, url: (value) => `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(value)}` },
+];
+
+const cancellationEventPatterns = [
+  /\bcancellation\s+(?:confirmation|confirmed|complete|completed|notice|approved)\b/i,
+  /\b(?:order|purchase)\s+cancellation\b(?!\s+(?:policy|options?|window|terms?))/i,
+  /\b(?:order|purchase|shipment|item)\b[^\r\n]{0,120}\bcancel(?:led|ed)\b/i,
+  /\bcancel(?:led|ed)\b[^\r\n]{0,120}\b(?:order|purchase|shipment|item)\b/i,
+  /\brefund\s+(?:confirmation|issued|processed|approved|complete|completed)\b/i,
+  /\b(?:order|purchase|item|payment)\b[^\r\n]{0,120}\b(?:was|is|has\s+been|will\s+be)\s+refunded\b/i,
+  /\brefund(?:ed)?\s+(?:for|on)\s+(?:your\s+)?(?:order|purchase|item|payment)\b/i,
+  /\brefunded\s+(?:your\s+)?(?:order|purchase|item|payment)\b/i,
 ];
 
 const merchantAliases: Array<[RegExp, string]> = [
@@ -127,9 +144,7 @@ export function isOneTimePinEmail(input: Pick<EmailInput, 'subject' | 'text' | '
 
 export function isCancellationNotice(input: Pick<EmailInput, 'subject' | 'text' | 'html'>): boolean {
   const body = `${input.text}\n${stripHtml(input.html ?? '')}`;
-  return /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(input.subject)
-    || /\b(?:order|purchase|shipment|item)\b[^\r\n]{0,120}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(body)
-    || /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[^\r\n]{0,120}\b(?:order|purchase|shipment|item)\b/i.test(body);
+  return hasExplicitCancellationSignal(input.subject, body);
 }
 
 /** Subject-only gate used before fetching an expensive MIME source. */
@@ -158,6 +173,7 @@ export function shouldSkipOversizedText(input: Pick<EmailInput, 'subject' | 'tex
 }
 
 function looksOrderRelated(text: string): boolean {
+  if (hasExplicitCancellationSignal(text)) return true;
   const signals = [
     /\border (?:confirmed|confirmation|number|#|has shipped|is on the way)\b/i,
     /\b(?:order|purchase|confirmation)\s*(?:number|no\.?|#|id)\b/i,
@@ -166,24 +182,18 @@ function looksOrderRelated(text: string): boolean {
     /\b(?:shipment|package) (?:has shipped|is on the way|was delivered|delivered)\b/i,
     /\bthanks? for your (?:order|purchase)\b/i,
     /\bexpected delivery\b/i,
-    /\b(?:order|purchase|shipment|item)\b[\s\S]{0,100}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i,
-    /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[\s\S]{0,100}\b(?:order|purchase|shipment|item)\b/i,
-    /\b(?:cancelled|canceled|cancellation)\b/i,
   ];
   return signals.some((signal) => signal.test(text));
 }
 
 function parseStatus(subject: string, text: string): ParsedOrderStatus {
   const normalizedSubject = subject.toLowerCase();
-  if (/cancelled|canceled|cancellation|refund(?:ed)?/.test(normalizedSubject)
-    // Keep cancellation matching on one rendered line. Looking across
-    // arbitrary newlines turns a product name such as "Noise Cancellation"
-    // into a cancelled order simply because an order number appeared earlier
-    // in the email.
-    || /\b(?:order|purchase|shipment)\b[^\r\n]{0,120}\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b/i.test(text)
-    || /\b(?:cancelled|canceled|cancellation|refund(?:ed)?)\b[^\r\n]{0,120}\b(?:order|purchase|shipment)\b/i.test(text)) return 'cancelled';
+  if (hasExplicitCancellationSignal(subject, text)) return 'cancelled';
   if (/delivered/.test(normalizedSubject) || /\b(?:package|order|shipment) (?:was |has been )?delivered\b/i.test(text)) return 'delivered';
-  if (/shipped|on the way|in transit|out for delivery/.test(normalizedSubject) || /\b(?:has shipped|shipped via|tracking number)\b/i.test(text)) return 'shipped';
+  if (/shipped|on the way|in transit|out for delivery/.test(normalizedSubject)
+    || /\b(?:order|package|shipment)\b[^\r\n]{0,80}\b(?:has shipped|is on the way|is in transit|is out for delivery)\b/i.test(text)
+    || /\bshipped via\b/i.test(text)
+    || findTracking(text) !== null) return 'shipped';
   if (/processing|preparing|getting your order ready/.test(normalizedSubject) || /\bpreparing (?:your )?(?:order|shipment)\b/i.test(text)) return 'processing';
   // A generic order acknowledgement is not proof that the retailer accepted
   // the order. Keep it pending until a matching confirmation message arrives.
@@ -218,27 +228,43 @@ function parseMerchant(fromAddress: string, fromName: string | null): string {
   const domain = fromAddress.split('@')[1]?.toLowerCase() ?? '';
   const alias = merchantAliases.find(([pattern]) => pattern.test(domain));
   if (alias) return alias[1];
-  const cleanedName = fromName?.replace(/(?:orders?|shipping|notifications?|customer service)/gi, '').trim();
+  const cleanedName = fromName
+    ?.replace(/\b(?:orders?|shipping|notifications?|customer\s+service)\b/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s|:–—-]+|[\s|:–—-]+$/g, '')
+    .trim();
   if (cleanedName && cleanedName.length >= 2) return cleanedName.slice(0, 80);
-  const domainName = domain.split('.').slice(-2, -1)[0] || domain.split('.')[0] || 'Store';
+  const domainParts = domain.split('.').filter(Boolean);
+  const hasCountryCodeSuffix = domainParts.length >= 3
+    && domainParts.at(-1)?.length === 2
+    && /^(?:ac|co|com|gov|net|org)$/.test(domainParts.at(-2) ?? '');
+  const domainName = domainParts.at(hasCountryCodeSuffix ? -3 : -2) || domainParts[0] || 'Store';
   return domainName.charAt(0).toUpperCase() + domainName.slice(1);
 }
 
 function parseTotal(text: string): number | null {
-  const matches = [...text.matchAll(/(?:order\s+total|grand\s+total|total)\s*:?\s*(?:USD\s*)?\$\s*([\d,]+\.\d{2})/gi)];
-  const value = matches.at(-1)?.[1];
+  const labelledMatches = [...text.matchAll(/(?:^|\n)\s*(?:order\s+total|grand\s+total|amount\s+(?:charged|paid)|total\s+(?:charged|paid))\s*:?\s*(?:USD\s*)?\$\s*([\d,]+\.\d{2})\b/gim)];
+  const genericMatches = [...text.matchAll(/(?:^|\n)\s*(?:your\s+)?total\s*:?\s*(?:USD\s*)?\$\s*([\d,]+\.\d{2})\b/gim)];
+  const value = labelledMatches.at(-1)?.[1] ?? genericMatches.at(-1)?.[1];
   if (!value) return null;
   const amount = Number.parseFloat(value.replace(/,/g, ''));
   return Number.isFinite(amount) ? Math.round(amount * 100) : null;
 }
 
 function parseExpectedDelivery(text: string, receivedAt: Date): Date | null {
-  const match = text.match(/(?:expected|estimated|scheduled)\s+(?:delivery|arrival)(?:\s+date)?\s*:?\s*(?:by\s+)?([A-Za-z]{3,9}\s+\d{1,2}(?:,\s+\d{4})?)/i);
+  const match = text.match(/(?:expected|estimated|scheduled)\s+(?:delivery|arrival)(?:\s+date)?\s*:?\s*(?:by\s+)?(?:[A-Za-z]{3,9},\s+)?([A-Za-z]{3,9})\s+(\d{1,2})(?:,\s+(\d{4}))?/i);
   if (!match) return null;
-  const withYear = /\d{4}/.test(match[1]) ? match[1] : `${match[1]}, ${receivedAt.getUTCFullYear()}`;
-  const parsed = new Date(withYear);
-  if (Number.isNaN(parsed.getTime())) return null;
-  if (parsed.getTime() < receivedAt.getTime() - 30 * 86_400_000) parsed.setUTCFullYear(parsed.getUTCFullYear() + 1);
+  const month = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+    .indexOf(match[1].slice(0, 3).toLowerCase());
+  const day = Number.parseInt(match[2], 10);
+  let year = match[3] ? Number.parseInt(match[3], 10) : receivedAt.getUTCFullYear();
+  if (month < 0 || day < 1 || day > 31) return null;
+  let parsed = new Date(Date.UTC(year, month, day));
+  if (parsed.getUTCMonth() !== month || parsed.getUTCDate() !== day) return null;
+  if (!match[3] && parsed.getTime() < receivedAt.getTime() - 30 * 86_400_000) {
+    year += 1;
+    parsed = new Date(Date.UTC(year, month, day));
+  }
   return parsed;
 }
 
@@ -296,9 +322,9 @@ function parseItems(text: string): ParsedOrderItem[] {
  * Fixtures without a heading continue to use the conservative row parser.
  */
 function boundReceiptItemSection(lines: string[]): string[] {
-  const start = lines.findIndex((line) => /^(?:items?|products?)\s*(?:purchased|ordered)?(?:\s*[:#-]?\s*\d{1,3})?$/i.test(line));
+  const start = lines.findIndex((line) => /^(?:(?:order|purchased)\s+)?(?:items?|products?)(?:\s+(?:purchased|ordered))?(?:\s*[:#-]?\s*\(?\d{1,3}\)?)?$/i.test(line));
   if (start < 0) return lines;
-  const end = lines.slice(start + 1).findIndex((line) => /^(?:subtotal|shipping|delivery|tax|grand\s+total|order\s+total|payment|billing|view\s+(?:order|cart|details?)|cancel(?:led|ed)\s+item)\b/i.test(line));
+  const end = lines.slice(start + 1).findIndex(isItemSectionBoundary);
   return end < 0 ? lines.slice(start) : lines.slice(start, start + 1 + end);
 }
 
@@ -307,9 +333,10 @@ function parseItemLine(value: string, labelled: boolean, adjacentDetails: string
   if (!line || isAddressLine(line) || (!labelled && (isMetadataLine(line) || isNarrativeLine(line)))) return null;
 
   const detailText = `${line}${adjacentDetails ? ` | ${adjacentDetails}` : ''}`;
-  const quantityMatch = detailText.match(/(?:^|[|\s])(?:qty|quantity)\b[^\d]{0,20}(\d{1,3})\b/i)
-    ?? detailText.match(/^(\d{1,3})\s*[x×]\s+/i);
-  const quantity = quantityMatch ? Math.max(1, Number.parseInt(quantityMatch[1], 10)) : 1;
+  const quantityMatch = findQuantityMatch(detailText);
+  const explicitQuantity = quantityMatch ? Number.parseInt(quantityMatch[1], 10) : null;
+  if (explicitQuantity !== null && explicitQuantity < 1) return null;
+  const quantity = explicitQuantity ?? 1;
   const lineMoneyMatches = [...line.matchAll(/\$\s*([\d,]+\.\d{2})/g)];
   const moneyMatches = lineMoneyMatches.length > 0
     ? lineMoneyMatches
@@ -319,7 +346,7 @@ function parseItemLine(value: string, labelled: boolean, adjacentDetails: string
   if (!labelled && !quantityMatch) return null;
 
   const parts = line.split('|').map((part) => part.trim()).filter(Boolean);
-  let name = parts.find((part) => !/(?:qty|quantity|sku|price|total)\s*[:#=-]?/i.test(part) && !/^\$?[\d,]+(?:\.\d{2})?$/.test(part)) ?? line;
+  let name = parts.find((part) => !isItemDetailPart(part) && !/^\$?[\d,]+(?:\.\d{2})?$/.test(part)) ?? line;
   name = name
     .replace(/^(?:\d{1,3})\s*[x×]\s*/i, '')
     .replace(/(?:qty|quantity)\s*[:#=-]?\s*\d{1,3}\b/gi, '')
@@ -328,17 +355,20 @@ function parseItemLine(value: string, labelled: boolean, adjacentDetails: string
     // Inline styles can leak into a text-only MIME part. Remove only obvious
     // CSS property tokens at the beginning, never arbitrary words in a name.
     .replace(/^(?:border(?:-[a-z]+)?|background(?:-[a-z]+)?|padding|margin|font(?:-[a-z]+)?|color|display|width|height)\s*[:=-]?\s+/i, '')
+    .replace(/\s*\|\s*$/, '')
     .replace(/\s*[-—–:]\s*$/, '')
     .replace(/[({\[]+\s*$/, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (name.length < 2 || name.length > 240 || !/[A-Za-z]/.test(name)
-    || isMetadataLine(name) || isAddressLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)
+    || (isMetadataLine(name) && (!labelled || isStandaloneMetadataLabel(name)))
+    || isAddressLine(name) || isNarrativeLine(name) || isValueOnlyLine(name)
     || isNonProductLine(name)) return null;
 
   const price = moneyMatches.at(-1)?.[1];
   const priceCents = price ? parseMoneyCents(price) : null;
-  const hasTotalLabel = /(?:line|item|product)\s+total\s*[:#=-]?|total\s*[:#=-]?/i.test(lineMoneyMatches.length > 0 ? line : detailText);
+  const priceSource = lineMoneyMatches.length > 0 ? line : detailText;
+  const hasTotalLabel = /(?:^|\|)\s*(?:(?:line|item|product)\s+)?total\b\s*(?:[:#=-]\s*)?(?=(?:USD\s*)?\$)/i.test(priceSource);
   return {
     name,
     quantity,
@@ -361,7 +391,15 @@ function parseMoneyCents(value: string): number | null {
 }
 
 function isMetadataLine(value: string): boolean {
-  return /^(?:order|confirmation|subtotal|shipping|delivery|delivers?|delivered|ship(?:ped)?|recipient|tax|grand\s+total|total|payment|billing|shipping\s+address|billing\s+address|tracking|status|date|email|phone|credit\s+card|order\s+timeline|qty|quantity|items?|products?)\b/i.test(value);
+  const line = value.trim();
+  return isStandaloneMetadataLabel(line)
+    || /^(?:order|purchase|confirmation)\s*(?:number|no\.?|#|id)\b/i.test(line)
+    || /^(?:subtotal|shipping(?:\s*(?:&|and)\s*handling|\s+(?:fee|cost|handling))?|delivery(?:\s+(?:fee|cost))?|tax|grand\s+total|order\s+total|total)\b\s*[:#=-]?\s*(?:(?:USD\s*)?[$€£]\s*)?[\d,]+(?:\.\d{2})?/i.test(line)
+    || /^(?:delivers?|delivered|ships?|shipping|delivery)\s+to\b/i.test(line)
+    || /^(?:shipping|billing)\s+address\b/i.test(line)
+    || /^(?:tracking\s*(?:number|no\.?|#|id)?|status|date|email|phone|credit\s+card|recipient|payment(?:\s+(?:method|details?))?|billing(?:\s+details?)?)\s*[:#=-]/i.test(line)
+    || /^(?:qty|quantity)(?:\s+ordered)?\s*[:#=.-]?\s*(?:\|\s*)?\d{1,3}\b/i.test(line)
+    || /^(?:(?:order|purchased)\s+)?(?:items?|products?)(?:\s+(?:purchased|ordered))?(?:\s*[:#-]?\s*\(?\d{1,3}\)?)?$/i.test(line);
 }
 
 function isAddressLine(value: string): boolean {
@@ -370,8 +408,31 @@ function isAddressLine(value: string): boolean {
   // label and the address itself as metadata so nearby Qty/price rows cannot
   // turn them into purchased products.
   return /^(?:delivers?|delivered|ships?|shipping|delivery)\s+to\b/i.test(line)
-    || /\b(?:p\.?o\.?\s+box|apt\.?|apartment|unit|suite|ste\.?|street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|highway|hwy\.?|parkway|pkwy\.?)\b/i.test(line) && /\d/.test(line)
+    || /\bp\.?o\.?\s+box\s+\d+\b/i.test(line)
+    || /\b\d{1,6}[A-Z]?\s+[A-Za-z0-9.'’#-](?:[A-Za-z0-9.'’# -]{0,60})\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|highway|hwy\.?|parkway|pkwy\.?)\b(?:\s*[,#-]|\s+(?:apt\.?|apartment|unit|suite|ste\.?)\b|$)/i.test(line)
     || /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(line);
+}
+
+function isStandaloneMetadataLabel(value: string): boolean {
+  return /^(?:order|confirmation|subtotal|shipping|delivery|delivers?(?:\s+to)?|delivered|ships?\s+to|recipient|tax|grand\s+total|total|payment|billing|shipping\s+address|billing\s+address|tracking|status|date|email|phone|credit\s+card|order\s+timeline|qty|quantity|items?|products?)\s*[:#-]?$/i.test(value.trim());
+}
+
+function isItemDetailPart(value: string): boolean {
+  const part = value.trim();
+  return /^(?:qty|quantity)(?:\s+ordered)?\b\s*[:#=.-]?\s*(?:\|\s*)?\d/i.test(part)
+    || /^(?:sku|style|model)\b\s*[:#=-]/i.test(part)
+    || /^(?:(?:line|item|product)\s+total|unit\s+price|price|total)\b\s*[:#=-]?\s*(?:USD\s*)?[$€£]?\s*[\d,]/i.test(part);
+}
+
+function findQuantityMatch(value: string): RegExpMatchArray | null {
+  return value.match(/(?:^|[|\s])(?:qty|quantity)(?:\s+ordered)?\s*(?:[:#=.-]\s*)?(?:\|\s*)?(\d{1,3})\b(?!\.\d)/i)
+    ?? value.match(/^(\d{1,3})\s*[x×]\s+/i);
+}
+
+function isItemSectionBoundary(value: string): boolean {
+  const line = value.trim();
+  if (/^(?:payment|billing|shipping\s+address|billing\s+address|order\s+timeline|view\s+(?:order|cart|details?)|cancel(?:led|ed)\s+item)\b/i.test(line)) return true;
+  return /^(?:subtotal|shipping(?:\s*(?:&|and)\s*handling|\s+(?:fee|cost|handling))?|delivery(?:\s+(?:fee|cost))?|tax|grand\s+total|order\s+total)(?:\s*[:#-]?\s*(?:(?:USD\s*)?[$€£]\s*[\d,]+(?:\.\d{2})?|free))?$/i.test(line);
 }
 
 function isValueOnlyLine(value: string): boolean {
@@ -394,7 +455,8 @@ function isNonProductLine(value: string): boolean {
 }
 
 function hasItemEvidence(value: string): boolean {
-  return /(?:qty|quantity)\b[^\d]{0,20}\d{1,3}\b/i.test(value)
+  const quantityMatch = findQuantityMatch(value);
+  return Boolean(quantityMatch && Number.parseInt(quantityMatch[1], 10) > 0)
     || /\$\s*[\d,]+\.\d{2}/.test(value);
 }
 
@@ -435,7 +497,7 @@ function findKnownOrderNumber(value: string, knownOrderNumbers: readonly string[
 
 function normalizeOrderNumber(value: string | undefined): string | null {
   if (!value) return null;
-  const normalized = value.trim().toUpperCase();
+  const normalized = value.trim().toUpperCase().replace(/-+$/, '');
   if (normalized.length < 5
     // An order identifier must contain a digit. Without this guard, prose
     // such as "order confirmation", "order ending", and "order cutoff"
@@ -443,6 +505,10 @@ function normalizeOrderNumber(value: string | undefined): string | null {
     || !/\d/.test(normalized)
     || /^(?:ORDER|PURCHASE|NUMBER|CONFIRM(?:ED|ATION)?|CANCEL(?:LED|ED|LATION)?|REFUND(?:ED)?|WAS|HAS|BEEN|SHIPPED|SHIPPING|DELIVERED|DELIVERY|TRACKING|PACKAGE|SHIPMENT|PROCESSING|IS|NOW|YOUR|THE|THIS|THAT|FOR|FROM|WITH|ASSOCIATED|REQUEST|COMPLETE|COMPLETED)$/.test(normalized)) return null;
   return normalized;
+}
+
+function hasExplicitCancellationSignal(...values: string[]): boolean {
+  return values.some((value) => cancellationEventPatterns.some((pattern) => pattern.test(value)));
 }
 
 function escapeRegExp(value: string): string {

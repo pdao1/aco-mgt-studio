@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isOneTimePinEmail, parseOrderEmail, shouldSkipOversizedMessage, shouldSkipOversizedText } from '../server/email/parser.js';
+import { isCancellationNotice, isLikelyOrderMessage, isOneTimePinEmail, parseOrderEmail, shouldSkipOversizedMessage, shouldSkipOversizedText } from '../server/email/parser.js';
 
 const receivedAt = new Date('2026-08-20T12:00:00.000Z');
 
@@ -46,6 +46,20 @@ describe('parseOrderEmail', () => {
     expect(parsed?.expectedDelivery?.toISOString()).toContain('2026-08-24');
   });
 
+  it('keeps a promised future tracking number at the confirmed status', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<tracking-placeholder@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Your order is confirmed',
+      text: 'Order number: TG-12002\nWe will email your tracking number when your package ships.',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed).toMatchObject({ status: 'confirmed', trackingNumber: null });
+  });
+
   it('recognizes delivered USPS mail', () => {
     const parsed = parseOrderEmail({
       messageId: '<delivered@example>',
@@ -64,6 +78,25 @@ describe('parseOrderEmail', () => {
     });
   });
 
+  it('does not treat a USPS-shaped numeric order number as tracking without tracking context', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<numeric-order-not-tracking@example>',
+      fromAddress: 'orders@example-store.com',
+      fromName: 'Example Store Orders',
+      subject: 'Your order is confirmed',
+      text: 'Order number: 94001112025558883342\nOrder total: $42.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed).toMatchObject({
+      orderNumber: '94001112025558883342',
+      status: 'confirmed',
+      trackingNumber: null,
+      trackingUrl: null,
+    });
+  });
+
   it('recognizes cancellation notices and extracts the order number after the cancellation wording', () => {
     const parsed = parseOrderEmail({
       messageId: '<cancelled@example>',
@@ -79,6 +112,32 @@ describe('parseOrderEmail', () => {
       orderNumber: 'R-847201',
       status: 'cancelled',
     });
+  });
+
+  it('does not treat a product with Noise Cancellation in the subject as a cancellation notice', () => {
+    const email = {
+      messageId: '<cancellation-product-subject@example>',
+      fromAddress: 'orders@walmart.com',
+      fromName: 'Walmart',
+      subject: 'Order confirmed: Headphones with Active Noise Cancellation',
+      text: 'Order number: WM-847202\nProduct: Headphones with Active Noise Cancellation\nQty: 1\nOrder total: $179.00',
+      html: null,
+      receivedAt,
+    };
+
+    expect(isCancellationNotice(email)).toBe(false);
+    expect(parseOrderEmail(email)?.status).toBe('confirmed');
+  });
+
+  it('does not send cancellation-policy marketing through the order review gate', () => {
+    const email = {
+      subject: 'Changes to our cancellation policy',
+      text: 'Review the new cancellation policy and refund options before your next purchase.',
+      html: null,
+    };
+
+    expect(isCancellationNotice(email)).toBe(false);
+    expect(isLikelyOrderMessage(email)).toBe(false);
   });
 
   it('matches a cancellation email against a known order number when the notice omits an order label', () => {
@@ -169,6 +228,48 @@ describe('parseOrderEmail', () => {
     expect(parsed?.orderNumber).toBe('102003715051916');
   });
 
+  it('removes trailing separators from an otherwise explicit order number', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<trailing-order-separator@example>',
+      fromAddress: 'orders@example-store.com',
+      fromName: 'Example Store',
+      subject: 'Your order is confirmed',
+      text: 'Order number: AB-12345-\nOrder total: $12.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.orderNumber).toBe('AB-12345');
+  });
+
+  it('does not use subtotal as the purchase total when no total is present', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<subtotal-only@example>',
+      fromAddress: 'orders@example-store.com',
+      fromName: 'Example Store',
+      subject: 'Your order is confirmed',
+      text: 'Order number: EX-12001\nSubtotal: $40.00\nShipping: $2.00\nTax: $1.68',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.totalCents).toBeNull();
+  });
+
+  it('parses yearless delivery dates in UTC and rolls them into the next year', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<yearless-delivery@example>',
+      fromAddress: 'orders@example-store.com',
+      fromName: 'Example Store',
+      subject: 'Your order is confirmed',
+      text: 'Order number: EX-12002\nExpected delivery by Friday, January 3',
+      html: null,
+      receivedAt: new Date('2026-12-20T23:30:00.000Z'),
+    });
+
+    expect(parsed?.expectedDelivery?.toISOString()).toBe('2027-01-03T00:00:00.000Z');
+  });
+
   it('extracts a compact item overview from labelled retailer lines', () => {
     const parsed = parseOrderEmail({
       messageId: '<items@example>',
@@ -202,6 +303,84 @@ describe('parseOrderEmail', () => {
       { name: 'Air Max 90', quantity: 2, unitPriceCents: 12000, totalCents: null },
       { name: 'Crew Socks', quantity: 1, unitPriceCents: 1800, totalCents: null },
     ]);
+  });
+
+  it('keeps legitimate product names that resemble shipping, address, or total metadata', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<metadata-word-products@example>',
+      fromAddress: 'orders@example-store.co.uk',
+      fromName: 'Orderly Notifications',
+      subject: 'Your order is confirmed',
+      text: [
+        'Order number: EX-12003',
+        'Items purchased (3)',
+        'Shipping Label Printer',
+        'Qty 1',
+        'Sesame Street 123 Figure',
+        'Qty 1',
+        'Product: Total War Collector Edition | Qty: 1 | $59.99',
+        'Subtotal: $99.99',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.merchant).toBe('Orderly');
+    expect(parsed?.items).toEqual([
+      { name: 'Shipping Label Printer', quantity: 1, unitPriceCents: null, totalCents: null },
+      { name: 'Sesame Street 123 Figure', quantity: 1, unitPriceCents: null, totalCents: null },
+      { name: 'Total War Collector Edition', quantity: 1, unitPriceCents: 5999, totalCents: null },
+    ]);
+  });
+
+  it('uses the registrable merchant label for common country-code domains', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<country-code-domain@example>',
+      fromAddress: 'orders@shop.example.co.uk',
+      fromName: null,
+      subject: 'Your order is confirmed',
+      text: 'Order number: EX-12006\nOrder total: $10.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.merchant).toBe('Example');
+  });
+
+  it('does not turn a price after a quantity label into the item quantity', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<quantity-price-confusion@example>',
+      fromAddress: 'orders@example-store.com',
+      fromName: 'Example Store',
+      subject: 'Your order is confirmed',
+      text: [
+        'Order number: EX-12004',
+        'Items purchased',
+        'Mystery Product',
+        'Qty: $12.99',
+        'Order total: $12.99',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([]);
+    expect(parsed?.itemCount).toBeNull();
+  });
+
+  it('drops explicit zero-quantity rows instead of coercing them to one', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<zero-quantity@example>',
+      fromAddress: 'orders@example-store.com',
+      fromName: 'Example Store',
+      subject: 'Your order is confirmed',
+      text: 'Order number: EX-12005\nProduct: Removed Item\nQty: 0\nOrder total: $0.00',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([]);
+    expect(parsed?.itemCount).toBeNull();
   });
 
   it('does not treat fulfillment labels or delivery addresses as purchased items', () => {
