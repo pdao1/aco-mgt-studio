@@ -41,13 +41,11 @@ export default function MarketingSite() {
       </section>
       <section className="product-offerings" aria-label="Login portals">
         <article>
-          <span className="product-portal-label">Login portal</span>
           <h2>Individuals</h2>
           <p>Buy Pokémon online? Connect your own inboxes and follow all your purchases, items, and shipments in a private personal dashboard.</p>
           <a className="primary-action" href="/customer">Login Portal for Individuals <ArrowRight size={16}/></a>
         </article>
         <article>
-          <span className="product-portal-label">Login portal</span>
           <h2>ACO Operations</h2>
           <p>Manage your customers, share a private order view with each of them, and invoice your service fees from your company workspace.</p>
           <a className="secondary-action" href="/app">Login Portal for ACOs <ArrowRight size={16}/></a>
