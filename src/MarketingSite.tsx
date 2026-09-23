@@ -35,9 +35,9 @@ export default function MarketingSite() {
         <a className="marketing-login" href="/app/dashboard">Operator sign in <ArrowRight size={15} /></a>
       </header>
       <section className="marketing-hero">
-        <span className="marketing-kicker"><Sparkles size={15} /> Two products. One reliable order engine.</span>
-        <h1>Every order, all in one place.</h1>
-        <p>Personal purchases or customer operations. Choose the order dashboard built for you.</p>
+        <span className="marketing-kicker"><Sparkles size={15} /> Two product offerings, one reliable data extraction engine.</span>
+        <h1>Every order, tracked, for everyone.</h1>
+        <p>Whether you&apos;re an individual shoppaholic wanting to track all of your orders in a single place or an ACO operation needing to manage their customers&apos; orders and handle their billing, Order Tracker Pro has the solution for you.</p>
       </section>
       <section className="product-offerings" aria-label="Login portals">
         <article>
