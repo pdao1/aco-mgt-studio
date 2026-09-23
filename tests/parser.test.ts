@@ -4,6 +4,24 @@ import { isCancellationNotice, isLikelyOrderMessage, isOneTimePinEmail, parseOrd
 const receivedAt = new Date('2026-08-20T12:00:00.000Z');
 
 describe('parseOrderEmail', () => {
+  it('matches an atypical retailer update to a known order without inventing another order', () => {
+    const email = {
+      messageId: '<update@target.com>', fromAddress: 'orders@oe.target.com', fromName: 'Target',
+      subject: "It's here!", text: '912003774472093\nYour items have arrived.', html: null, receivedAt,
+    };
+    expect(parseOrderEmail(email, { knownOrderNumbers: ['912003774472093'] }))
+      .toMatchObject({ merchant: 'Target', orderNumber: '912003774472093' });
+    expect(parseOrderEmail({ ...email, subject: 'Your one-time PIN', text: `${email.text}\nVerification code: 123456` },
+      { knownOrderNumbers: ['912003774472093'] })).toBeNull();
+  });
+
+  it('admits broad purchase/receipt language for review but still requires identity to create an order', () => {
+    const email = { messageId: '<receipt@target.com>', fromAddress: 'orders@target.com', fromName: 'Target',
+      subject: 'Your receipt', text: 'Thanks for shopping with us.', html: null, receivedAt };
+    expect(isLikelyOrderMessage(email)).toBe(true);
+    expect(parseOrderEmail(email)).toBeNull();
+  });
+
   it('extracts a confirmation without inventing tracking from a numeric order number', () => {
     const parsed = parseOrderEmail({
       messageId: '<confirmation@example>',

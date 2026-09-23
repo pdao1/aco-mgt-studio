@@ -12,6 +12,7 @@ import {
 } from './parser.js';
 import { runOrderIngestion } from '../workflows/order-ingestion.js';
 import type { OrderEnrichmentProvider } from '../workflows/order-enrichment.js';
+import { MAILBOX_PARSER_VERSION, orderDiscoveryQuery, selectMessageBatch } from './discovery.js';
 
 const GMAIL_HOST = 'imap.gmail.com';
 
@@ -73,7 +74,9 @@ export class MailboxSyncCoordinator {
   enqueue(customerId: string, options: { fullHistory?: boolean } = {}): boolean {
     if (this.active.has(customerId)) return false;
     this.active.add(customerId);
-    void this.syncOne(customerId, options.fullHistory === true).finally(() => this.active.delete(customerId));
+    void this.syncOne(customerId, options.fullHistory === true)
+      .catch(() => console.error(`[mailbox-sync] customer=${customerId} could not start or finish sync`))
+      .finally(() => this.active.delete(customerId));
     return true;
   }
 
@@ -82,15 +85,17 @@ export class MailboxSyncCoordinator {
   }
 
   private async syncOne(customerId: string, fullHistory = false) {
+    if (fullHistory) await this.repository.setMailboxBackfillDays(this.workspaceId, customerId, 365);
     const mailbox = await this.repository.getMailbox(this.workspaceId, customerId);
     if (!mailbox) return;
 
     const runId = await this.repository.beginSync(this.workspaceId, customerId);
     let scanned = 0;
     let matched = 0;
+    let hasBacklog = false;
     const itemReviewBudget = { remaining: this.maxAiReviewsPerSync };
     const knownOrderNumbers = new Set(await this.repository.listOrderNumbers(this.workspaceId, customerId));
-    const processedMessageKeys = new Set(await this.repository.listProcessedMessageKeys(this.workspaceId, customerId));
+    const processedMessageKeys = new Set(await this.repository.listProcessedMessageKeys(this.workspaceId, customerId, MAILBOX_PARSER_VERSION));
     const client = createClient(mailbox.gmailAddress, this.secretBox.decrypt(mailbox.secretCiphertext));
 
     try {
@@ -100,67 +105,54 @@ export class MailboxSyncCoordinator {
       const mailboxPath = allMail?.path ?? 'INBOX';
       const lock = await client.getMailboxLock(mailboxPath, { readOnly: true, description: 'order synchronization' });
       try {
-        const since = !fullHistory && mailbox.lastSyncedAt
-          ? new Date(mailbox.lastSyncedAt.getTime() - 24 * 60 * 60 * 1000)
-          : new Date(Date.now() - mailbox.syncDays * 24 * 60 * 60 * 1000);
-        const after = since.toISOString().slice(0, 10).replace(/-/g, '/');
-        // Search the bounded customer mailbox window rather than relying on a
-        // subject-keyword allowlist. Retailer cancellation and fulfillment
-        // notices use many different subjects; parsing is the order-related
-        // filter and only durable matches are loaded into the order table.
+        // Always revisit the whole history window, not just last_synced_at:
+        // capped batches must not strand old mail behind a moving cursor.
+        // Manual Sync requests a durable one-year backfill. Polls continue it
+        // across batches/restarts before returning to the normal saved window.
+        const historyDays = Math.max(mailbox.syncDays, mailbox.backfillDays, fullHistory ? 365 : 0);
+        const since = new Date(Date.now() - historyDays * 24 * 60 * 60 * 1000);
         const searched = await client.search({
-          gmraw: `after:${after}`,
+          gmraw: orderDiscoveryQuery(since),
         }, { uid: true });
-        // Cancellation notices were previously ignored. Search the full
-        // configured history on every sync so an already-processed mailbox can
-        // be repaired without resetting its incremental cursor.
-        const cancellationSince = new Date(Date.now() - mailbox.syncDays * 24 * 60 * 60 * 1000);
-        const cancellationAfter = cancellationSince.toISOString().slice(0, 10).replace(/-/g, '/');
-        const cancellationSearched = await client.search({
-          gmraw: `after:${cancellationAfter} {cancelled canceled cancellation refund}`,
-        }, { uid: true });
-        const cancellationUids = [...new Set(cancellationSearched || [])]
-          .sort((left, right) => left - right)
-          .slice(-this.maxMessages);
-        const regularUids = [...new Set(searched || [])].sort((left, right) => left - right);
-        const remainingCapacity = Math.max(0, this.maxMessages - cancellationUids.length);
-        const uids = [...new Set([
-          ...cancellationUids,
-          ...regularUids.slice(-remainingCapacity),
-        ])]
-          .sort((left, right) => left - right)
-          .slice(-this.maxMessages);
+        const uids = [...new Set(searched || [])].sort((a, b) => a - b);
         if (uids.length > 0) {
           // Fetch headers first. Message-ID is the durable de-duplication key,
           // so previously processed messages do not need their full MIME
           // source downloaded and parsed on every refresh.
           const candidateUids: number[] = [];
-          for await (const message of client.fetch(uids, { envelope: true, internalDate: true }, { uid: true })) {
-            const messageKey = message.envelope?.messageId?.trim() || null;
-            if (messageKey && processedMessageKeys.has(messageKey)) continue;
-            const subject = message.envelope?.subject || '(no subject)';
-            const fromAddress = message.envelope?.from?.[0]?.address || 'unknown@unknown.invalid';
-            const receivedValue = message.internalDate || new Date();
-            const parsedReceivedAt = receivedValue instanceof Date ? receivedValue : new Date(receivedValue);
-            const receivedAt = Number.isNaN(parsedReceivedAt.getTime()) ? new Date() : parsedReceivedAt;
-            const metadata = {
-              messageKey: messageKey || createHash('sha256')
-                .update(`${message.uid}\0${fromAddress}\0${subject}\0${receivedAt.toISOString()}`)
-                .digest('hex'),
-              fromAddress,
-              subject,
-              receivedAt,
-            };
-            if (isOneTimePinEmail({ subject, text: '', html: null })) {
-              await this.repository.recordMessage(this.workspaceId, customerId, metadata, null);
-              processedMessageKeys.add(metadata.messageKey);
-              continue;
+          // Bound each IMAP command, but apply the processing cap only AFTER
+          // deduplication. Processed messages never consume the batch quota.
+          for (let offset = 0; offset < uids.length; offset += 500) {
+            for await (const message of client.fetch(uids.slice(offset, offset + 500), { envelope: true, internalDate: true }, { uid: true })) {
+              const messageKey = message.envelope?.messageId?.trim() || null;
+              if (messageKey && processedMessageKeys.has(messageKey)) continue;
+              const subject = message.envelope?.subject || '(no subject)';
+              const fromAddress = message.envelope?.from?.[0]?.address || 'unknown@unknown.invalid';
+              const receivedValue = message.internalDate || new Date();
+              const parsedReceivedAt = receivedValue instanceof Date ? receivedValue : new Date(receivedValue);
+              const receivedAt = Number.isNaN(parsedReceivedAt.getTime()) ? new Date() : parsedReceivedAt;
+              const metadata = {
+                messageKey: messageKey || createHash('sha256')
+                  .update(`${message.uid}\0${fromAddress}\0${subject}\0${receivedAt.toISOString()}`)
+                  .digest('hex'),
+                fromAddress,
+                subject,
+                receivedAt,
+                parserVersion: MAILBOX_PARSER_VERSION,
+              };
+              if (processedMessageKeys.has(metadata.messageKey)) continue;
+              if (isOneTimePinEmail({ subject, text: '', html: null })) {
+                await this.repository.recordMessage(this.workspaceId, customerId, metadata, null);
+                processedMessageKeys.add(metadata.messageKey);
+                continue;
+              }
+              candidateUids.push(message.uid);
             }
-            candidateUids.push(message.uid);
           }
 
           if (candidateUids.length > 0) {
-            for await (const message of client.fetch(candidateUids, { envelope: true, internalDate: true, source: true }, { uid: true })) {
+            hasBacklog = candidateUids.length > this.maxMessages;
+            for await (const message of client.fetch(selectMessageBatch(candidateUids, this.maxMessages), { envelope: true, internalDate: true, source: true }, { uid: true })) {
               scanned += 1;
               const envelopeMessageKey = message.envelope?.messageId?.trim() || null;
               if (envelopeMessageKey && processedMessageKeys.has(envelopeMessageKey)) continue;
@@ -176,7 +168,8 @@ export class MailboxSyncCoordinator {
                 // header-only and source fetches.
                 .update(`${message.uid}\0${fromAddress}\0${subject}\0${receivedAt.toISOString()}`)
                 .digest('hex');
-              const metadata = { messageKey, fromAddress, subject, receivedAt };
+              if (processedMessageKeys.has(messageKey)) continue;
+              const metadata = { messageKey, fromAddress, subject, receivedAt, parserVersion: MAILBOX_PARSER_VERSION };
 
               if (!message.source || message.source.length > MAX_EMAIL_SOURCE_BYTES || shouldSkipOversizedMessage(subject, message.source.length)) {
                 await this.repository.recordMessage(this.workspaceId, customerId, metadata, null);
@@ -211,6 +204,7 @@ export class MailboxSyncCoordinator {
                 fromAddress: parsedFromAddress,
                 subject: parsedSubject,
                 receivedAt: parsedReceivedAt,
+                parserVersion: MAILBOX_PARSER_VERSION,
               };
               if (isOneTimePinEmail(email) || shouldSkipOversizedText(email)) {
                 await this.repository.recordMessage(this.workspaceId, customerId, finalMetadata, null);
@@ -219,18 +213,14 @@ export class MailboxSyncCoordinator {
                 continue;
               }
               const parsedOrder = parseOrderEmail(email, { knownOrderNumbers: [...knownOrderNumbers] });
-              const result = await runOrderIngestion(this.workspaceId, customerId, email, {
-                messageKey: finalMessageKey,
-                fromAddress: parsedFromAddress,
-                subject: parsedSubject,
-                receivedAt: parsedReceivedAt,
-              }, {
+              const result = await runOrderIngestion(this.workspaceId, customerId, email, finalMetadata, {
                 repository: this.repository,
                 parse: () => parsedOrder,
                 enricher: this.enricher,
                 itemReviewBudget,
               });
-              if (parsedOrder?.orderNumber) knownOrderNumbers.add(parsedOrder.orderNumber);
+              if (result.orderNumber) knownOrderNumbers.add(result.orderNumber);
+              if (result.validation === 'deferred') hasBacklog = true;
               processedMessageKeys.add(finalMessageKey);
               processedMessageKeys.add(messageKey);
               if (result.matched) matched += 1;
@@ -239,6 +229,9 @@ export class MailboxSyncCoordinator {
         }
       } finally {
         lock.release();
+      }
+      if (!hasBacklog && mailbox.backfillDays > 0) {
+        await this.repository.setMailboxBackfillDays(this.workspaceId, customerId, 0);
       }
       await this.repository.finishSync(this.workspaceId, customerId, runId, { scanned, matched });
     } catch (error) {

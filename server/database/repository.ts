@@ -41,6 +41,7 @@ export interface MailboxRecord {
   gmailAddress: string;
   secretCiphertext: string;
   syncDays: number;
+  backfillDays: number;
   lastSyncedAt: Date | null;
 }
 
@@ -51,6 +52,7 @@ export interface ProcessedMessageMeta {
   receivedAt: Date;
   /** Privacy-safe excerpt used to explain later parser corrections. */
   redactedExcerpt?: string;
+  parserVersion?: string;
 }
 
 export interface ParserFeedbackExample {
@@ -1156,9 +1158,10 @@ export class Repository {
         gmail_address: string;
         secret_ciphertext: string;
         sync_days: number;
+        backfill_days: number;
         last_synced_at: Date | null;
       }>(`
-        SELECT c.id AS customer_id, c.gmail_address, m.secret_ciphertext, c.sync_days, c.last_synced_at
+        SELECT c.id AS customer_id, c.gmail_address, m.secret_ciphertext, c.sync_days, c.backfill_days, c.last_synced_at
         FROM customers c
         JOIN customer_mailboxes m ON m.workspace_id = c.workspace_id AND m.customer_id = c.id
         WHERE c.workspace_id = $1 AND c.id = $2
@@ -1169,6 +1172,7 @@ export class Repository {
         gmailAddress: row.gmail_address,
         secretCiphertext: row.secret_ciphertext,
         syncDays: row.sync_days,
+        backfillDays: row.backfill_days,
         lastSyncedAt: row.last_synced_at,
       } : null;
     });
@@ -1181,6 +1185,13 @@ export class Repository {
         [workspaceId],
       );
       return result.rows.map((row) => row.id);
+    });
+  }
+
+  async setMailboxBackfillDays(workspaceId: string, customerId: string, days: number): Promise<void> {
+    await this.withWorkspace(workspaceId, async (client) => {
+      await client.query('UPDATE customers SET backfill_days = $3 WHERE workspace_id = $1 AND id = $2',
+        [workspaceId, customerId, days]);
     });
   }
 
@@ -1197,15 +1208,15 @@ export class Repository {
     });
   }
 
-  async listProcessedMessageKeys(workspaceId: string, customerId: string): Promise<string[]> {
+  async listProcessedMessageKeys(workspaceId: string, customerId: string, parserVersion?: string): Promise<string[]> {
     return this.withWorkspace(workspaceId, async (client) => {
       const result = await client.query<{ message_key: string }>(`
         SELECT message_key
         FROM processed_messages
         WHERE workspace_id = $1 AND customer_id = $2
+          AND ($3::text IS NULL OR parser_version = $3)
         ORDER BY received_at DESC
-        LIMIT 50000
-      `, [workspaceId, customerId]);
+      `, [workspaceId, customerId, parserVersion ?? null]);
       return result.rows.map((row) => row.message_key);
     });
   }
@@ -1260,20 +1271,22 @@ export class Repository {
     return this.withWorkspace(workspaceId, async (client) => {
       const processed = await client.query<{ id: string }>(`
         INSERT INTO processed_messages(
-          id, workspace_id, customer_id, message_key, sender_domain, subject, received_at, matched_order, redacted_excerpt
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          id, workspace_id, customer_id, message_key, sender_domain, subject, received_at, matched_order, redacted_excerpt, parser_version
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (workspace_id, customer_id, message_key) DO NOTHING
         RETURNING id
       `, [
         randomUUID(), workspaceId, customerId, meta.messageKey,
-        extractDomain(meta.fromAddress), meta.subject.slice(0, 500), meta.receivedAt, Boolean(parsed), meta.redactedExcerpt ?? null,
+        extractDomain(meta.fromAddress), meta.subject.slice(0, 500), meta.receivedAt, Boolean(parsed), meta.redactedExcerpt ?? null, meta.parserVersion ?? null,
       ]);
-      if (processed.rowCount === 0 && meta.redactedExcerpt) {
+      if (processed.rowCount === 0) {
         await client.query(`
           UPDATE processed_messages
-          SET redacted_excerpt = COALESCE(redacted_excerpt, $4)
+          SET redacted_excerpt = COALESCE(redacted_excerpt, $4),
+              parser_version = COALESCE($5, parser_version),
+              matched_order = matched_order OR $6
           WHERE workspace_id = $1 AND customer_id = $2 AND message_key = $3
-        `, [workspaceId, customerId, meta.messageKey, meta.redactedExcerpt]);
+        `, [workspaceId, customerId, meta.messageKey, meta.redactedExcerpt ?? null, meta.parserVersion ?? null, Boolean(parsed)]);
       }
       if (!parsed) return false;
 
@@ -1341,6 +1354,7 @@ export class Repository {
       } else {
         await client.query(`
           UPDATE orders SET
+            ordered_at = LEAST(ordered_at, $9::timestamptz),
             status = CASE WHEN status_rank($4) >= status_rank(status) THEN $4 ELSE status END,
             total_cents = COALESCE($5, total_cents),
             item_count = COALESCE($6, item_count),
@@ -1357,7 +1371,7 @@ export class Repository {
             END,
             updated_at = now(), source_message_key = $8
           WHERE workspace_id = $1 AND customer_id = $2 AND id = $3
-        `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.messageKey]);
+        `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.messageKey, parsed.orderedAt]);
       }
 
       if (parsed.trackingNumber) {

@@ -3,6 +3,8 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { Repository } from '../server/database/repository.js';
 import type { ParsedOrderEmail } from '../server/email/parser.js';
+import { parseOrderEmail } from '../server/email/parser.js';
+import { MAILBOX_PARSER_VERSION } from '../server/email/discovery.js';
 
 describe('parser feedback persistence', () => {
   let db: PGlite;
@@ -93,5 +95,50 @@ describe('parser feedback persistence', () => {
     const feedback = await repository.listParserFeedback(workspaceId);
     expect(feedback.some((row) => row.feedbackType === 'archive_order')).toBe(true);
     expect(feedback.find((row) => row.feedbackType === 'hide_item')?.sourceExcerpt).not.toContain('buyer@example.com');
+  });
+
+  it('replays legacy decisions once, updates existing orders, and preserves manual corrections', async () => {
+    expect(await repository.listProcessedMessageKeys(workspaceId, customerId, MAILBOX_PARSER_VERSION)).toEqual([]);
+    const email = { messageId: 'feedback-message', fromAddress: 'orders@target.com', fromName: 'Target',
+      subject: 'Order confirmed', text: 'Order # 912003774472093', html: null,
+      receivedAt: new Date('2026-09-14T10:15:00Z') };
+    const parsed = parseOrderEmail(email)!;
+    const meta = { messageKey: email.messageId, fromAddress: email.fromAddress, subject: email.subject,
+      receivedAt: email.receivedAt, parserVersion: MAILBOX_PARSER_VERSION };
+    await repository.recordMessage(workspaceId, customerId, meta, parsed);
+    await repository.recordMessage(workspaceId, customerId, meta, parsed);
+    expect(await repository.listProcessedMessageKeys(workspaceId, customerId, MAILBOX_PARSER_VERSION)).toEqual(['feedback-message']);
+    const dashboard = await repository.dashboard(workspaceId);
+    expect(dashboard.orders).toHaveLength(1);
+    expect(dashboard.orders[0]).toMatchObject({ id: orderId, isArchived: true, hiddenItemCount: 1 });
+    expect(new Date(dashboard.orders[0].orderedAt).toISOString()).toBe(email.receivedAt.toISOString());
+
+    const repairMeta = { ...meta, messageKey: 'legacy-no-match' };
+    await repository.recordMessage(workspaceId, customerId, { ...repairMeta, parserVersion: undefined }, null);
+    expect(await repository.listProcessedMessageKeys(workspaceId, customerId, MAILBOX_PARSER_VERSION)).not.toContain('legacy-no-match');
+    await repository.recordMessage(workspaceId, customerId, repairMeta, { ...parsed, messageKey: repairMeta.messageKey, status: 'delivered' });
+    const { rows } = await db.query<{ matched_order: boolean }>('SELECT matched_order FROM processed_messages WHERE message_key = $1', ['legacy-no-match']);
+    expect(rows[0].matched_order).toBe(true);
+    expect((await repository.dashboard(workspaceId)).orders[0].status).toBe('delivered');
+  });
+
+  it('removes inbox-scoped deduplication and order data before reconnection', async () => {
+    const input = { name: 'Reconnect test', gmailAddress: 'reconnect@gmail.com', syncDays: 365, secretCiphertext: 'test' };
+    const old = await repository.createCustomer(workspaceId, input);
+    const email = { messageId: '<reconnect>', fromAddress: 'orders@target.com', fromName: 'Target',
+      subject: 'Your order shipped', text: 'Order # TG-99999\nTracking number: 1Z7W9A7Y03ABCD9827', html: null,
+      receivedAt: new Date('2026-09-20Z') };
+    const meta = { messageKey: email.messageId, fromAddress: email.fromAddress, subject: email.subject, receivedAt: email.receivedAt };
+    await repository.recordMessage(workspaceId, old.id, meta, parseOrderEmail(email));
+    await repository.beginSync(workspaceId, old.id);
+    expect(await repository.removeCustomer(workspaceId, old.id)).toBe(true);
+    for (const table of ['customer_mailboxes', 'orders', 'shipments', 'order_events', 'processed_messages', 'sync_runs']) {
+      const { rows } = await db.query<{ count: number }>(`SELECT count(*)::int AS count FROM ${table} WHERE customer_id = $1`, [old.id]);
+      expect(rows[0].count, table).toBe(0);
+    }
+    const reconnected = await repository.createCustomer(workspaceId, input);
+    expect(reconnected.id).not.toBe(old.id);
+    expect(await repository.listProcessedMessageKeys(workspaceId, reconnected.id)).toEqual([]);
+    expect(await repository.recordMessage(workspaceId, reconnected.id, meta, parseOrderEmail(email))).toBe(true);
   });
 });

@@ -104,13 +104,13 @@ const merchantAliases: Array<[RegExp, string]> = [
 export function parseOrderEmail(input: EmailInput, context: EmailParseContext = {}): ParsedOrderEmail | null {
   if (isOneTimePinEmail(input)) return null;
   const plain = normalizeText(`${input.subject}\n${input.text}\n${stripHtml(input.html ?? '')}`);
-  if (!looksOrderRelated(plain)) return null;
+  const historicalOrderNumber = findKnownOrderNumber(plain, context.knownOrderNumbers ?? []);
+  if (!historicalOrderNumber && !looksOrderRelated(plain)) return null;
 
   const status = parseStatus(input.subject, plain);
   // Prefer an exact customer-history match over a newly guessed token. This
   // is what lets a cancellation/shipment notice from a different retailer
   // sender update the existing order instead of creating a second row.
-  const historicalOrderNumber = findKnownOrderNumber(plain, context.knownOrderNumbers ?? []);
   const orderNumber = historicalOrderNumber ?? firstOrderNumber(plain);
   const tracking = findTracking(plain);
   const items = parseItems(plain);
@@ -175,6 +175,7 @@ export function shouldSkipOversizedText(input: Pick<EmailInput, 'subject' | 'tex
 function looksOrderRelated(text: string): boolean {
   if (hasExplicitCancellationSignal(text)) return true;
   const signals = [
+    /\byour\s+(?:purchase|receipt|shipment|package|delivery|pickup)\b|\b(?:purchase|payment)\s+receipt\b/i,
     /\border (?:confirmed|confirmation|number|#|has shipped|is on the way)\b/i,
     /\b(?:order|purchase|confirmation)\s*(?:number|no\.?|#|id)\b/i,
     /\b(?:order|purchase)\s*[:#-]?\s*[A-Z0-9][A-Z0-9-]{4,}\b/i,

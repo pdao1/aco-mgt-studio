@@ -10,6 +10,24 @@ afterEach(() => {
 });
 
 describe('order enrichment boundary', () => {
+  it('does not finalize unmatched mail when AI repair has no budget or the provider fails', async () => {
+    const repository = { recordMessage: vi.fn() };
+    const email = { messageId: '<deferred>', fromAddress: 'orders@target.com', fromName: 'Target',
+      subject: 'Your purchase receipt', text: 'Purchase receipt\nReference: 912003774472093', html: null,
+      receivedAt: new Date('2026-09-20Z') };
+    const meta = { messageKey: '<deferred>', fromAddress: email.fromAddress, subject: email.subject, receivedAt: email.receivedAt };
+    const enrich = vi.fn(async () => { throw new Error('Provider unavailable'); });
+    for (const remaining of [0, 1]) {
+      const result = await runOrderIngestion('workspace', 'customer', email, meta, {
+        repository: repository as unknown as Repository, parse: () => null,
+        enricher: { name: 'test', enrich }, itemReviewBudget: { remaining },
+      });
+      expect(result.validation).toBe('deferred');
+    }
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(repository.recordMessage).not.toHaveBeenCalled();
+  });
+
   it('redacts addresses and bounds text before a future model call', () => {
     const input = buildRedactedEnrichmentInput({
       messageKey: 'message-1',

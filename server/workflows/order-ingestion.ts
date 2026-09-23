@@ -22,9 +22,10 @@ export interface OrderIngestionDependencies {
 }
 
 export interface OrderIngestionResult {
+  orderNumber?: string | null;
   matched: boolean;
   source: 'deterministic' | 'ai' | 'none';
-  validation: 'accepted' | 'rejected' | 'skipped';
+  validation: 'accepted' | 'rejected' | 'skipped' | 'deferred';
 }
 
 /**
@@ -106,7 +107,7 @@ export async function runOrderIngestion(
       }
     }
     const matched = await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, normalized);
-    return { matched, source: itemReviewAccepted ? 'ai' : 'deterministic', validation: matched ? 'accepted' : 'skipped' };
+    return { matched, orderNumber: normalized.orderNumber, source: itemReviewAccepted ? 'ai' : 'deterministic', validation: matched ? 'accepted' : 'skipped' };
   }
 
   const enricher = dependencies.enricher ?? new NoopOrderEnrichmentProvider();
@@ -120,6 +121,11 @@ export async function runOrderIngestion(
   const budget = dependencies.itemReviewBudget;
   let repairFeedback: string | undefined;
   for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS_PER_MESSAGE; attempt += 1) {
+    // No attempt was possible: leave the email eligible for a later batch,
+    // rather than permanently recording an AI-budget skip as a no-match.
+    if (budget && budget.remaining <= 0 && attempt === 1) {
+      return { matched: false, source: 'ai', validation: 'deferred' };
+    }
     if (budget && budget.remaining <= 0) break;
     if (budget) budget.remaining -= 1;
     let enriched: unknown;
@@ -135,12 +141,12 @@ export async function runOrderIngestion(
       }));
     } catch (error) {
       console.warn(`[order-enrichment] order repair skipped provider=${enricher.name} reason=${safeErrorMessage(error)}`);
-      break;
+      return { matched: false, source: 'ai', validation: 'deferred' };
     }
     const normalized = validateEnrichedOrder(enriched, { messageKey: meta.messageKey, receivedAt: meta.receivedAt });
     if (normalized && isGroundedOrderNumber(normalized.orderNumber, email)) {
       const matched = await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, normalized);
-      return { matched, source: 'ai', validation: matched ? 'accepted' : 'skipped' };
+      return { matched, orderNumber: normalized.orderNumber, source: 'ai', validation: matched ? 'accepted' : 'skipped' };
     }
     repairFeedback = normalized
       ? 'The order identifier was not copied exactly from the email text. Retry only if an explicit order number is present; otherwise return null for orderNumber.'
