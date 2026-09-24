@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, Boxes, CheckCircle2, Mail, ReceiptText, ShieldCheck, Sparkles } from 'lucide-react';
 import { soloApi } from './solo/api';
 import { identityApi } from './lib/identity';
+import WhopCheckoutButton from './components/WhopCheckoutButton';
 import './products.css';
 
 export default function MarketingSite() {
@@ -44,11 +45,13 @@ export default function MarketingSite() {
           <h2>Individuals</h2>
           <p>Buy Pokémon online? Connect your own inboxes and follow all your purchases, items, and shipments in a private personal dashboard.</p>
           <a className="primary-action" href="/customer">Login Portal for Individuals <ArrowRight size={16}/></a>
+          <WhopCheckoutButton product="solo" label="Buy Individual License" />
         </article>
         <article>
           <h2>ACO Operations</h2>
           <p>Manage your customers, share a private order view with each of them, and invoice your service fees from your company workspace.</p>
           <a className="secondary-action" href="/app">Login Portal for ACOs <ArrowRight size={16}/></a>
+          <WhopCheckoutButton product="aco" label="Buy ACO License" />
         </article>
       </section>
       <h2 className="marketing-section-heading">Features</h2>

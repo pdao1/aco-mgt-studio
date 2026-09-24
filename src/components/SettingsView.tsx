@@ -1,4 +1,4 @@
-import { Check, Download, LockKeyhole, Palette, Save } from 'lucide-react';
+import { Check, Download, Palette, Save } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import type { WorkspaceSettings } from '../types';
 import { WORKSPACE_THEMES } from '../lib/themes';
@@ -6,17 +6,18 @@ import { WORKSPACE_THEMES } from '../lib/themes';
 interface SettingsViewProps {
   settings: WorkspaceSettings;
   workspaceSlug: string;
-  onSave: (settings: WorkspaceSettings) => Promise<void>;
-  onChangePassword: (currentPassword: string, newPassword: string) => Promise<unknown>;
+  onSave: (settings: WorkspaceSettings, workspaceSlug:string) => Promise<void>;
 }
 
-export function SettingsView({ settings, workspaceSlug, onSave, onChangePassword }: SettingsViewProps) {
+export function SettingsView({ settings, workspaceSlug, onSave }: SettingsViewProps) {
   const [form, setForm] = useState(settings);
+  const [slug,setSlug]=useState(workspaceSlug);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => setForm(settings), [settings]);
+  useEffect(() => setSlug(workspaceSlug), [workspaceSlug]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -24,7 +25,7 @@ export function SettingsView({ settings, workspaceSlug, onSave, onChangePassword
     setSaved(false);
     setError('');
     try {
-      await onSave(form);
+      await onSave(form,slug);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 3000);
     } catch (caught) {
@@ -40,7 +41,7 @@ export function SettingsView({ settings, workspaceSlug, onSave, onChangePassword
       <h2>Company & appearance</h2>
       <div className="settings-form-grid">
         <label className="settings-wide"><span>ACO Company Name</span><input value={form.displayName} onChange={(event) => { setSaved(false); setForm({ ...form, displayName: event.target.value }); }} maxLength={120} required pattern=".*\S.*" /><small>Shown in the top-left corner, your customer portal, and new invoices.</small></label>
-        <div className="settings-wide settings-workspace-id"><span>Workspace ID <strong>{workspaceSlug}</strong></span><a href={`/app/workspaces/${encodeURIComponent(workspaceSlug)}`}>Workspace sign-in link</a></div>
+        <label className="settings-wide"><span>Custom workspace path</span><input value={slug} onChange={event=>{setSaved(false);setSlug(event.target.value.toLowerCase());}} required maxLength={80} pattern="[a-z0-9]+(-[a-z0-9]+)*" /><small>ordertracker.pro/app/workspaces/{slug} · Letters, numbers, and hyphens. Discord remembers this destination for you; it is not a login credential.</small></label>
         <fieldset className="settings-wide theme-picker"><legend>Theme</legend><p>Four light and four dark themes, shared with your customer portal. Save to apply.</p>
           {(['light', 'dark'] as const).map((mode) => <div className="theme-group" key={mode}><h3>{mode === 'light' ? 'Light themes' : 'Dark themes'}</h3><div className="theme-options">
             {WORKSPACE_THEMES.filter((theme) => theme.mode === mode).map((theme) => <label className={`theme-option ${form.theme === theme.id ? 'selected' : ''}`} key={theme.id}>
@@ -63,36 +64,6 @@ export function SettingsView({ settings, workspaceSlug, onSave, onChangePassword
       <p>Hide or restore item rows from order details to build a workspace-scoped correction set. Download the redacted JSONL when you want to review or run offline evaluations.</p>
       <a className="secondary-action" href="/api/parser-feedback/export"><Download size={16} /> Download feedback JSONL</a>
     </section>
-    <PasswordSettings onChangePassword={onChangePassword} />
+    <section className="settings-panel"><h2>Login & license</h2><p>Your ACO license is linked to Discord. Use Discord to sign in; no workspace password is required.</p><a href="https://whop.com/@me/settings/memberships/" target="_blank" rel="noreferrer">Manage your Whop membership</a></section>
   </section>;
-}
-
-function PasswordSettings({ onChangePassword }: Pick<SettingsViewProps, 'onChangePassword'>) {
-  const [current, setCurrent] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmation, setConfirmation] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setError(''); setSaved(false);
-    if (password !== confirmation) { setError('The new passwords do not match.'); return; }
-    setBusy(true);
-    try {
-      await onChangePassword(current, password);
-      setCurrent(''); setPassword(''); setConfirmation(''); setSaved(true);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Password could not be changed.'); }
-    finally { setBusy(false); }
-  };
-  return <form className="settings-panel password-settings" onSubmit={submit}>
-    <h2><LockKeyhole size={17} /> Workspace password</h2><p>Only operators in this workspace use this password. Changing it signs out other sessions.</p>
-    <div className="settings-form-grid">
-      <label className="settings-wide"><span>Current password</span><input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} maxLength={512} required /></label>
-      <label><span>New password <small>12 characters minimum</small></span><input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={12} maxLength={512} required /></label>
-      <label><span>Confirm new password</span><input type="password" autoComplete="new-password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} minLength={12} maxLength={512} required /></label>
-    </div>
-    <div className="settings-actions"><span className="settings-note" role="status">{saved ? 'Password changed. Other sessions must sign in again.' : 'Your current session will stay signed in.'}</span><button className="primary-action" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button></div>
-    {error && <p className="form-error" role="alert">{error}</p>}
-  </form>;
 }

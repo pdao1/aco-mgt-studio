@@ -24,23 +24,14 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  activateService: (serial: string) => request<{ ok: true }>('/api/access/activate', {
-    method: 'POST', body: JSON.stringify({ serial }),
-  }),
-  login: (password: string, workspaceSlug: string) => request<{ ok: true }>('/api/auth/login', {
-    method: 'POST', body: JSON.stringify({ password, workspaceSlug }),
-  }),
-  register: (password: string, workspaceSlug: string, displayName: string) => request<{ ok: true }>('/api/auth/register', {
-    method: 'POST', body: JSON.stringify({ password, workspaceSlug, displayName }),
-  }),
-  changePassword: (currentPassword: string, newPassword: string) => request<{ ok: true }>('/api/settings/password', {
-    method: 'PATCH', body: JSON.stringify({ currentPassword, newPassword }),
+  createWhopCheckout: (product: 'solo'|'aco') => request<{sessionId:string;planId:string;returnUrl:string}>('/api/whop/checkout', {
+    method:'POST',body:JSON.stringify({product}),
   }),
   logout: () => request<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
   dashboard: () => request<DashboardPayload>('/api/dashboard'),
   billing: () => request<BillingPayload>('/api/billing'),
   settings: () => request<{ settings: WorkspaceSettings }>('/api/settings'),
-  updateSettings: (input: Partial<WorkspaceSettings>) => request<{ settings: WorkspaceSettings }>('/api/settings', {
+  updateSettings: (input: Partial<WorkspaceSettings>&{workspaceSlug?:string}) => request<{ settings: WorkspaceSettings }>('/api/settings', {
     method: 'PATCH', body: JSON.stringify(input),
   }),
   connectCustomer: (input: ConnectCustomerInput) => request<{ customer: Customer }>('/api/customers', {

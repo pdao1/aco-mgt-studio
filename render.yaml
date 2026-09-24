@@ -38,6 +38,10 @@ services:
         value: prod_3mqbBwetOGv5G
       - key: WHOP_ACO_PRODUCT_ID
         value: prod_SiiEh8TDBF2nk
+      - key: WHOP_SOLO_PLAN_ID
+        sync: false
+      - key: WHOP_ACO_PLAN_ID
+        sync: false
       - key: WHOP_SOLO_MAILBOX_LIMIT
         value: "2"
       - key: STRIPE_SECRET_KEY

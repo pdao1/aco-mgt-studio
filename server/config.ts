@@ -29,6 +29,8 @@ const schema = z.object({
   WHOP_ACCOUNT_ID: optionalSecret,
   WHOP_SOLO_PRODUCT_ID: optionalSecret,
   WHOP_ACO_PRODUCT_ID: optionalSecret,
+  WHOP_SOLO_PLAN_ID: z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().regex(/^plan_[A-Za-z0-9]+$/).optional()),
+  WHOP_ACO_PLAN_ID: z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().regex(/^plan_[A-Za-z0-9]+$/).optional()),
   WHOP_SOLO_MAILBOX_LIMIT: z.coerce.number().int().min(1).max(2).default(2),
   TRACKING_ENVIRONMENT: z.enum(['production', 'sandbox']).default('production'),
   SMTP_HOST: optionalSecret,
@@ -87,6 +89,8 @@ export type AppConfig = {
   whopAccountId: string | null;
   whopSoloProductId: string | null;
   whopAcoProductId: string | null;
+  whopSoloPlanId: string | null;
+  whopAcoPlanId: string | null;
   whopSoloMailboxLimit: number;
   trackingEnvironment: 'production' | 'sandbox';
   smtpHost: string | null;
@@ -154,6 +158,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     whopAccountId: value.WHOP_ACCOUNT_ID ?? null,
     whopSoloProductId: value.WHOP_SOLO_PRODUCT_ID ?? null,
     whopAcoProductId: value.WHOP_ACO_PRODUCT_ID ?? null,
+    whopSoloPlanId: value.WHOP_SOLO_PLAN_ID ?? null,
+    whopAcoPlanId: value.WHOP_ACO_PLAN_ID ?? null,
     whopSoloMailboxLimit: value.WHOP_SOLO_MAILBOX_LIMIT,
     trackingEnvironment: value.TRACKING_ENVIRONMENT,
     smtpHost: value.SMTP_HOST ?? null,

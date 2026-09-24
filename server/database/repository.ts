@@ -592,18 +592,19 @@ export class Repository {
     });
   }
 
-  async updateWorkspaceSettings(workspaceId: string, input: Partial<WorkspaceSettingsRecord>): Promise<WorkspaceSettingsRecord> {
+  async updateWorkspaceSettings(workspaceId: string, input: Partial<WorkspaceSettingsRecord> & {workspaceSlug?:string}): Promise<WorkspaceSettingsRecord> {
     return this.withWorkspace(workspaceId, async (client) => {
       // Lock and merge so a theme-only PATCH never clears payment or notification settings.
       const current = await client.query(`SELECT theme, display_name, logo_url, accent_color,
         notification_seller_email, venmo_payment_url FROM workspace_settings WHERE workspace_id = $1 FOR UPDATE`, [workspaceId]);
       if (!current.rows[0]) throw new Error('Workspace settings not found.');
-      const next = { ...toWorkspaceSettings(current.rows[0]), ...input };
+      const { workspaceSlug, ...settings } = input;
+      const next = { ...toWorkspaceSettings(current.rows[0]), ...settings };
       await client.query(`UPDATE workspace_settings SET display_name = $2, theme = $3, logo_url = $4,
         accent_color = $5, notification_seller_email = $6, venmo_payment_url = $7, updated_at = now()
         WHERE workspace_id = $1`, [workspaceId, next.displayName, next.theme, next.logoUrl,
         next.accentColor, next.notificationSellerEmail, next.venmoPaymentUrl]);
-      await client.query('UPDATE workspaces SET name = $2, updated_at = now() WHERE id = $1', [workspaceId, next.displayName]);
+      await client.query('UPDATE workspaces SET name = $2, slug = COALESCE($3,slug), updated_at = now() WHERE id = $1', [workspaceId, next.displayName, workspaceSlug ?? null]);
       return next;
     });
   }

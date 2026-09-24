@@ -3,4 +3,11 @@
 .product-offerings h2 { margin:0 0 12px; font-size:22px; }
 .product-offerings p { color:var(--muted); font-size:14px; line-height:1.7; }
 .product-offerings a { display:inline-flex; align-items:center; gap:8px; margin-top:15px; text-decoration:none; }
+.whop-checkout-launch { margin-top:12px; }
+.whop-checkout-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; padding:0 16px; border:1px solid #2165d2; border-radius:7px; background:#2165d2; color:#fff; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+.whop-checkout-button:disabled { opacity:.65; cursor:wait; }
+.whop-checkout-error { color:#b42318!important; font-size:13px!important; }
+.whop-checkout-embed { margin-top:16px; padding:14px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.whop-checkout-close { display:block; margin:0 0 10px auto; border:0; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
+.whop-checkout-embed iframe { width:100%; min-height:620px; border:0; }
 @media(max-width:780px) { .product-offerings {grid-template-columns:1fr;padding:20px;} }

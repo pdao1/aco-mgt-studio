@@ -1,10 +1,8 @@
 import { AlertTriangle, ExternalLink, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { BillingView } from './components/BillingView';
-import { AccessGate } from './components/AccessGate';
 import { ConnectCustomerDrawer } from './components/ConnectCustomerDrawer';
 import { CustomerRail } from './components/CustomerRail';
-import { LoginScreen } from './components/LoginScreen';
 import { OrderInspector } from './components/OrderInspector';
 import { OrdersTable, type DateWindow, type OrderFilter, type SortDirection } from './components/OrdersTable';
 import { OverviewView } from './components/OverviewView';
@@ -42,10 +40,7 @@ export default function App() {
       const [payload, billingPayload] = await Promise.all([api.dashboard(), api.billing()]);
       const routeSlug = window.location.pathname.match(/^\/app\/workspaces\/([^/]+)/)?.[1];
       if (routeSlug && decodeURIComponent(routeSlug) !== payload.workspace.slug) {
-        setData(null);
-        setBilling({ invoices: [] });
-        setNeedsLogin(true);
-        return;
+        window.history.replaceState(null,'',`/app/workspaces/${encodeURIComponent(payload.workspace.slug)}`);
       }
       setData(payload);
       setBilling(billingPayload);
@@ -213,20 +208,15 @@ export default function App() {
     }
   };
 
-  const activateService = async (serial: string) => {
-    await api.activateService(serial);
-    setNeedsAccess(false);
-    setLoading(true);
-    await refresh();
-  };
 
   useEffect(() => {
     document.title = data ? `${data.workspace.settings.displayName} | Order Tracker Pro` : 'Order Tracker Pro';
   }, [data?.workspace.settings.displayName]);
 
-  const saveSettings = async (settings: WorkspaceSettings) => {
-    const result = await api.updateSettings(settings);
-    setData((current) => current ? { ...current, workspace: { ...current.workspace, name: result.settings.displayName, settings: result.settings } } : current);
+  const saveSettings = async (settings: WorkspaceSettings,workspaceSlug:string) => {
+    const result = await api.updateSettings({...settings,workspaceSlug});
+    window.history.replaceState(null,'',`/app/workspaces/${encodeURIComponent(workspaceSlug)}`);
+    setData((current) => current ? { ...current, workspace: { ...current.workspace, slug:workspaceSlug, name: result.settings.displayName, settings: result.settings } } : current);
     setBilling((current) => ({ invoices: current.invoices.map((invoice) => invoice.status === 'draft'
       ? { ...invoice, companyName: result.settings.displayName } : invoice) }));
   };
@@ -278,14 +268,6 @@ export default function App() {
     window.setTimeout(() => setToast(''), 4200);
   };
 
-  const login = async (password: string, slug: string, companyName?: string) => {
-    if (companyName !== undefined) await api.register(password, slug, companyName);
-    else await api.login(password, slug);
-    window.history.replaceState(null, '', `/app/workspaces/${encodeURIComponent(slug)}`);
-    setNeedsLogin(false);
-    setLoading(true);
-    await refresh();
-  };
 
   const logout = async () => {
     await api.logout();
@@ -295,8 +277,7 @@ export default function App() {
     setNeedsLogin(true);
   };
 
-  if (needsAccess) return <AccessGate onActivate={activateService} />;
-  if (needsLogin) return <LoginScreen onLogin={login} />;
+  if (needsAccess||needsLogin) return <main className="login-screen"><section className="login-panel"><h1>Sign in to your ACO workspace</h1><p>Use your ACO license key or linked Discord account.</p><a className="primary-action" href="/login?product=aco">Open ACO login portal</a></section></main>;
   if (loading) return <LoadingScreen />;
   if (loadError || !data) return <WorkspaceState detail={loadError || 'The workspace is unavailable.'} onRetry={() => { setLoading(true); setLoadError(''); void refresh(); }} />;
 
@@ -313,7 +294,7 @@ export default function App() {
       <section className={`workspace ${nav}-workspace`}>
         {nav === 'overview' && <OverviewView customers={data.customers} orders={data.orders} onOpenCustomer={openCustomerOrder} />}
         {nav === 'billing' && <BillingView customer={selectedCustomer} orders={activeCustomerOrders} invoices={billing.invoices} onCreateInvoice={createInvoice} onIssueInvoice={issueInvoice} />}
-        {nav === 'settings' && <SettingsView settings={data.workspace.settings} workspaceSlug={data.workspace.slug} onSave={saveSettings} onChangePassword={api.changePassword} />}
+        {nav === 'settings' && <SettingsView settings={data.workspace.settings} workspaceSlug={data.workspace.slug} onSave={saveSettings} />}
         {nav === 'customers' && (selectedCustomer ? (
           <>
             <header className="workspace-header">

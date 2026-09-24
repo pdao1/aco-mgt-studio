@@ -15,19 +15,18 @@ import { OpenAIOrderEnrichmentProvider } from './workflows/openai-order-review.j
 import { StripeBillingError, StripeBillingGateway, StripeNotConfiguredError } from './billing/stripe.js';
 import { SecretBox } from './security/secret-box.js';
 import { verifyPortalToken } from './security/portal-token.js';
-import { issueServiceAccess, requireServiceAccess, serialMatches } from './security/access.js';
+import { requireServiceAccess, serialMatches } from './security/access.js';
 import { SmtpNotifier } from './notifications/smtp.js';
 import { TrackingSyncCoordinator } from './tracking/coordinator.js';
 import { CompositeCarrierTrackingProvider, FedexTrackingProvider, UpsTrackingProvider, UspsTrackingProvider } from './tracking/providers.js';
 import {
   clearSession,
   enforceOrigin,
-  issueSession,
   loginRateLimit,
   requireSession,
 } from './security/session.js';
 
-import { hashPassword, verifyPassword } from './security/password.js';
+import { hashPassword } from './security/password.js';
 import { THEME_IDS } from '../src/lib/themes.js';
 import { createSoloRouter } from './solo/routes.js';
 import { createDiscordAuth, clearDiscordSession } from './auth/discord.js';
@@ -101,7 +100,7 @@ whop.start();
 if (config.nodeEnv === 'production') app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({
-  contentSecurityPolicy: config.nodeEnv === 'production' ? undefined : false,
+  contentSecurityPolicy: config.nodeEnv === 'production' ? {directives:{frameSrc:["'self'",'https://whop.com','https://*.whop.com']}} : false,
   crossOriginResourcePolicy: { policy: 'same-origin' },
   referrerPolicy: { policy: 'no-referrer' },
 }));
@@ -171,62 +170,23 @@ app.get('/api/health', async (_request, response) => {
   }
 });
 
+const checkoutLimiter=loginRateLimit();
+app.post('/api/whop/checkout',checkoutLimiter,async(request,response)=>{
+  const parsed=z.object({product:z.enum(['solo','aco'])}).strict().safeParse(request.body);
+  if(!parsed.success){response.status(400).json({message:'Select a valid product.'});return;}
+  try {response.json(await whop.createCheckout(parsed.data.product));}
+  catch(error) {response.status(503).json({message:error instanceof Error?error.message:'Whop checkout is temporarily unavailable.'});}
+});
+
 app.get(['/oauth/discord','/api/auth/discord/callback','/api/solo/auth/discord/callback'],discordAuth.callback);
 app.get('/api/solo/auth/discord',discordAuth.begin);
 app.use('/api/auth',discordAuth.router);
-// Once Discord is configured, legacy credential endpoints cannot bypass identity binding.
-app.post(['/api/access/activate','/api/auth/login','/api/auth/register'],(request,response,next)=>{
-  if(!discordAuth.enabled){next();return;}
-  response.status(409).json({error:'DISCORD_AUTH_REQUIRED',message:'Sign in with Discord at /login, then link your service.'});
+// No password, workspace-name, shared-serial, or registration bypass, even
+// when Discord is accidentally unconfigured.
+app.post(['/api/access/activate','/api/auth/login','/api/auth/register'],(_request,response)=>{
+  response.status(410).json({message:'Use your product license key and Discord at /app.'});
 });
-
 const workspaceSlugSchema = z.string().trim().toLowerCase().min(1).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-const loginSchema = z.object({ workspaceSlug: workspaceSlugSchema.default(config.workspaceSlug), password: z.string().min(1).max(512) }).strict();
-const registerSchema = z.object({ workspaceSlug: workspaceSlugSchema, displayName: z.string().trim().min(1).max(120), password: z.string().min(12).max(512) }).strict();
-const authLimiter = loginRateLimit();
-const accessSchema = z.object({ serial: z.string().trim().min(1).max(512) }).strict();
-app.post('/api/access/activate', (request, response) => {
-  const parsed = accessSchema.safeParse(request.body);
-  if (!parsed.success || !serialMatches(parsed.data.serial, config.serviceSerial)) {
-    response.status(401).json({ error: 'INVALID_SERVICE_SERIAL', message: 'That service serial is not valid.' });
-    return;
-  }
-  issueServiceAccess(response, config.serviceSerial, config.sessionSecret, config.nodeEnv === 'production');
-  response.json({ ok: true });
-});
-
-app.post('/api/auth/login', requireServiceAccess(config.sessionSecret, config.serviceSerial), authLimiter, async (request, response, next) => {
-  const parsed = loginSchema.safeParse(request.body);
-  try {
-    const credentials = parsed.success ? await repository.credentialsForSlug(parsed.data.workspaceSlug) : null;
-    const matches = await verifyPassword(parsed.success ? parsed.data.password : '', credentials?.password_hash ?? null);
-    if (!matches || !credentials) {
-      response.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'The workspace ID or password is incorrect.' });
-      return;
-    }
-    issueSession(response, credentials.workspaceId, config.sessionSecret, config.nodeEnv === 'production', credentials.session_version);
-    response.json({ ok: true });
-  } catch (error) { next(error); }
-});
-
-app.post('/api/auth/register', requireServiceAccess(config.sessionSecret, config.serviceSerial), authLimiter, async (request, response, next) => {
-  const parsed = registerSchema.safeParse(request.body);
-  if (!parsed.success) {
-    response.status(400).json({ error: 'INVALID_WORKSPACE', message: 'Enter a company name, a workspace ID using lowercase letters, numbers or hyphens, and a password of at least 12 characters.' });
-    return;
-  }
-  try {
-    const id = await repository.createWorkspace(parsed.data.workspaceSlug, parsed.data.displayName, await hashPassword(parsed.data.password));
-    issueSession(response, id, config.sessionSecret, config.nodeEnv === 'production');
-    response.status(201).json({ ok: true });
-  } catch (error) {
-    if (isPostgresUniqueViolation(error)) {
-      response.status(409).json({ error: 'WORKSPACE_EXISTS', message: 'That workspace ID is already in use. Choose another or sign in.' });
-      return;
-    }
-    next(error);
-  }
-});
 
 app.post('/api/auth/logout', (_request, response) => {
   clearDiscordSession(response,config.nodeEnv==='production');
@@ -281,26 +241,8 @@ app.use('/api', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
-app.patch('/api/settings/password', authLimiter, async (request, response, next) => {
-  const parsed = z.object({ currentPassword: z.string().min(1).max(512), newPassword: z.string().min(12).max(512) }).strict().safeParse(request.body);
-  if (!parsed.success) {
-    response.status(400).json({ error: 'INVALID_PASSWORD', message: 'Enter your current password and a new password of at least 12 characters.' });
-    return;
-  }
-  try {
-    const credentials = await repository.getCredentials(request.workspaceId!);
-    if (!await verifyPassword(parsed.data.currentPassword, credentials?.password_hash ?? null) || !credentials) {
-      response.status(401).json({ error: 'INVALID_PASSWORD', message: 'The current password is incorrect.' });
-      return;
-    }
-    const version = await repository.changePassword(request.workspaceId!, credentials.password_hash, await hashPassword(parsed.data.newPassword));
-    if (version === null) {
-      response.status(409).json({ error: 'PASSWORD_CHANGED', message: 'The password changed in another session. Sign in again.' });
-      return;
-    }
-    issueSession(response, request.workspaceId!, config.sessionSecret, config.nodeEnv === 'production', version);
-    response.json({ ok: true });
-  } catch (error) { next(error); }
+app.patch('/api/settings/password', (_request,response)=>{
+  response.status(410).json({message:'Workspace passwords have been replaced by license keys and Discord.'});
 });
 
 
@@ -329,6 +271,7 @@ app.get('/api/settings', async (request, response, next) => {
 });
 
 const settingsSchema = z.object({
+  workspaceSlug: workspaceSlugSchema.optional(),
   theme: z.enum(THEME_IDS).optional(),
   displayName: z.string().trim().min(1).max(120).optional(),
   logoUrl: z.string().url().refine((value) => value.startsWith('https://'), 'Logo URL must use HTTPS.').nullable().optional(),
@@ -346,6 +289,7 @@ app.patch('/api/settings', async (request, response, next) => {
   try {
     response.json({ settings: await repository.updateWorkspaceSettings(request.workspaceId!, parsed.data) });
   } catch (error) {
+    if(isPostgresUniqueViolation(error)){response.status(409).json({message:'That workspace path is already taken. Choose another.'});return;}
     next(error);
   }
 });

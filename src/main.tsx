@@ -9,6 +9,7 @@ const MarketingSite = lazy(() => import('./MarketingSite'));
 const SuperAdminView = lazy(() => import('./SuperAdminView'));
 const SoloBuyerApp = lazy(() => import('./solo/SoloBuyerApp'));
 const IdentityGate = lazy(() => import('./components/IdentityGate'));
+const CheckoutComplete = lazy(() => import('./components/CheckoutComplete'));
 
 const portalPrefix = '/portal/';
 const isPortalRoute = window.location.pathname.startsWith(portalPrefix);
@@ -16,13 +17,14 @@ const portalToken = isPortalRoute
   ? decodeURIComponent(window.location.pathname.slice(portalPrefix.length).split('/')[0] ?? '')
   : null;
 const isSuperAdminRoute = window.location.pathname === '/app/admin/super';
+const isCheckoutComplete = window.location.pathname === '/checkout/complete';
 const isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
 const isSoloRoute = window.location.pathname === '/customer' || window.location.pathname.startsWith('/customer/');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Suspense fallback={<main className="loading-screen">Loading…</main>}>
-    {window.location.pathname === '/login' ? <IdentityGate/> : isSoloRoute ? <IdentityGate product="solo"><SoloBuyerApp /></IdentityGate> : isPortalRoute ? <CustomerPortalApp token={portalToken ?? ''} /> : isSuperAdminRoute ? <SuperAdminView /> : isAppRoute ? <IdentityGate product="aco"><App /></IdentityGate> : <MarketingSite />}
+    {window.location.pathname === '/login' ? <IdentityGate/> : isCheckoutComplete ? <CheckoutComplete/> : isSoloRoute ? <IdentityGate product="solo"><SoloBuyerApp /></IdentityGate> : isPortalRoute ? <CustomerPortalApp token={portalToken ?? ''} /> : isSuperAdminRoute ? <SuperAdminView /> : isAppRoute ? <IdentityGate product="aco"><App /></IdentityGate> : <MarketingSite />}
     </Suspense>
   </StrictMode>,
 );

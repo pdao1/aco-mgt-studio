@@ -13,6 +13,8 @@ import { SoloRepository, type SoloAccount } from './repository.js';
 import { SOLO_COOKIE, clearSoloSession, issueSoloSession, readValue, signValue, type SoloSession } from './session.js';
 import { exchangeDiscordCode } from './discord.js';
 import { clearDiscordSession } from '../auth/discord.js';
+import { WhopService } from '../billing/whop.js';
+import { LicenseError } from '../billing/whop-membership.js';
 
 declare global { namespace Express { interface Request { soloAccount?: SoloAccount } } }
 interface Dependencies {
@@ -46,13 +48,18 @@ export function createSoloRouter({config,repository,secretBox,trackingProvider,c
     } catch(error){next(error);}
   });
   router.post('/auth/serial',limiter,async(request,response,next)=>{
-    const parsed=z.object({serial:z.string().trim().min(20).max(150)}).strict().safeParse(request.body);
+    const parsed=z.object({serial:z.string().trim().min(8).max(256)}).strict().safeParse(request.body);
     try {
-      const account=parsed.success ? await accounts.bySerial(parsed.data.serial) : null;
+      let account=parsed.success ? await accounts.bySerial(parsed.data.serial) : null;
+      if(!account&&parsed.success){
+        const license=await new WhopService(config,repository).verifyLicense(parsed.data.serial,'solo');
+        const result=await repository.pool.query<{id:string}>('SELECT id FROM solo_accounts WHERE workspace_id=$1',[license.workspaceId]);
+        account=result.rows[0]?await accounts.byId(result.rows[0].id):null;
+      }
       if (!account) {response.status(401).json({message:'That Solo Buyer serial is invalid, expired, or suspended.'});return;}
       issueSoloSession(response,account.id,account.sessionVersion,config.sessionSecret,secure,account.accessExpiresAt);
       response.json({path:`/customer/${account.handle}`});
-    } catch(error){next(error);}
+    } catch(error){if(error instanceof LicenseError){response.status(401).json({message:error.message});return;}next(error);}
   });
   router.post('/auth/logout',(_request,response)=>{clearDiscordSession(response,secure);clearSoloSession(response,secure);response.json({ok:true});});
   router.get('/auth/discord',limiter,async(request,response,next)=>{
