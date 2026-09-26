@@ -1279,6 +1279,7 @@ export class Repository {
     parsed: ParsedOrderEmail | null,
   ): Promise<boolean> {
     return this.withWorkspace(workspaceId, async (client) => {
+      let parserVersionChanged = false;
       const processed = await client.query<{ id: string }>(`
         INSERT INTO processed_messages(
           id, workspace_id, customer_id, message_key, sender_domain, subject, received_at, matched_order, redacted_excerpt, parser_version
@@ -1290,6 +1291,13 @@ export class Repository {
         extractDomain(meta.fromAddress), meta.subject.slice(0, 500), meta.receivedAt, Boolean(parsed), meta.redactedExcerpt ?? null, meta.parserVersion ?? null,
       ]);
       if (processed.rowCount === 0) {
+        const priorParser = await client.query<{ parser_version: string | null }>(`
+          SELECT parser_version
+          FROM processed_messages
+          WHERE workspace_id = $1 AND customer_id = $2 AND message_key = $3
+        `, [workspaceId, customerId, meta.messageKey]);
+        parserVersionChanged = Boolean(meta.parserVersion
+          && priorParser.rows[0]?.parser_version !== meta.parserVersion);
         await client.query(`
           UPDATE processed_messages
           SET redacted_excerpt = COALESCE(redacted_excerpt, $4),
@@ -1299,6 +1307,9 @@ export class Repository {
         `, [workspaceId, customerId, meta.messageKey, meta.redactedExcerpt ?? null, meta.parserVersion ?? null, Boolean(parsed)]);
       }
       if (!parsed) return false;
+      const refreshItemRows = parserVersionChanged
+        && /(?:^|\n)(?:items?\s+(?:purchased|ordered)|products?\s+(?:purchased|ordered)|your\s+product\s+and\s+delivery\s+information)\b/i
+          .test(meta.redactedExcerpt ?? '');
 
       // A full-history sync may revisit a message that was already marked as
       // processed before parser rules were corrected. Reprocess identified
@@ -1373,8 +1384,9 @@ export class Repository {
             ordered_at = LEAST(ordered_at, $9::timestamptz),
             status = CASE WHEN status_rank($4) >= status_rank(status) THEN $4 ELSE status END,
             total_cents = COALESCE($5, total_cents),
-            item_count = COALESCE($6, item_count),
+            item_count = CASE WHEN $14::boolean THEN $6 ELSE COALESCE($6, item_count) END,
             items = CASE
+              WHEN $14::boolean THEN $7::jsonb
               WHEN jsonb_array_length($7::jsonb) > 0
                 AND (jsonb_array_length(items) = 0
                   OR items::text ~* '(https?://|www[.]|click[.]oe[.]target[.]com|view[[:space:]]+order[[:space:]]+details|cancelled[[:space:]]+item|canceled[[:space:]]+item|item[[:space:]]+border|border[[:space:]]+(item|apple)|more[[:space:]]+items?[[:space:]]+to[[:space:]]+explore|video[[:space:]]+games|toys[[:space:]]*&[[:space:]]*games)'
@@ -1392,7 +1404,7 @@ export class Repository {
             updated_at = now(), source_message_key = $8
           WHERE workspace_id = $1 AND customer_id = $2 AND id = $3
         `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.messageKey, parsed.orderedAt,
-          parsed.emailTo, parsed.shippingAddress, parsed.paymentMethodType, parsed.paymentLast4]);
+          parsed.emailTo, parsed.shippingAddress, parsed.paymentMethodType, parsed.paymentLast4, refreshItemRows]);
       }
 
       if (parsed.trackingNumber) {

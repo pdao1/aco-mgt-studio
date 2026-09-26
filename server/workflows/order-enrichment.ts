@@ -101,14 +101,20 @@ export function validateEnrichedOrder(value: unknown, fallback: {
 }
 
 /** Validate a model response without allowing it to alter order identity. */
-export function validateEnrichedItems(value: unknown): ParsedOrderItem[] | null {
+export function validateEnrichedItems(
+  value: unknown,
+  sourceText?: string,
+  deterministicItems: readonly ParsedOrderItem[] = [],
+): ParsedOrderItem[] | null {
   if (!value || typeof value !== 'object' || !Array.isArray((value as { items?: unknown }).items)) return null;
-  return normalizeEnrichedItems((value as { items: unknown[] }).items);
+  const normalized = normalizeEnrichedItems((value as { items: unknown[] }).items);
+  if (sourceText === undefined) return normalized;
+  return normalized.filter((item) => isItemGroundedInSource(item, sourceText, deterministicItems));
 }
 
 function normalizeEnrichedItems(value: unknown): ParsedOrderItem[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 50).flatMap((entry) => {
+  const items = value.slice(0, 50).flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return [];
     const item = entry as Partial<ParsedOrderItem>;
     if (typeof item.name !== 'string' || item.name.trim().length < 2 || isNonProductItemName(item.name)) return [];
@@ -125,13 +131,54 @@ function normalizeEnrichedItems(value: unknown): ParsedOrderItem[] {
       totalCents,
     }];
   });
+  const unique = new Map<string, ParsedOrderItem>();
+  for (const item of items) {
+    const key = item.name.toLowerCase() + '\0' + item.quantity + '\0'
+      + (item.unitPriceCents ?? '') + '\0' + (item.totalCents ?? '');
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  return [...unique.values()];
 }
 
 function isNonProductItemName(value: string): boolean {
   const name = value.trim();
   return /https?:\/\/|www\.|\b(?:href|qs)=|click\.oe\.target\.com/i.test(name)
     || /^(?:view\s+(?:order|cart|details?)(?:\s+(?:order|cart|details?))?|order\s+(?:details|summary)|cancel(?:led|ed)\s+item|more\s+items?\s+to\s+explore|(?:recommended|related|suggested)\s+items?)$/i.test(name)
-    || /^(?:video\s+)?games?|toys?(?:\s*&\s*games)?$/i.test(name);
+    || /^(?:video\s+)?games?|toys?(?:\s*&\s*games)?$/i.test(name)
+    || /^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s+[A-Z]{2,5})?$/i.test(name)
+    || /^(?:your\s+)?product\s+and\s+delivery\s+information\b|^(?:item\s+subtotal|purchase\s+total|order\s+total|subtotal|estimated\s+delivery|payment\s+method|status)\b/i.test(name)
+    || /^(?:shipment\s+arriving|rewards?\s+summary|order\s+created\s+on|need\s+help\b|questions?\s*\?|important\s+information\b|get\s+your\s+order\s+details|your\s+purchase\s+receipt|thanks?\s+for\s+shopping\b)/i.test(name);
+}
+
+function isItemGroundedInSource(
+  item: ParsedOrderItem,
+  sourceText: string,
+  deterministicItems: readonly ParsedOrderItem[],
+): boolean {
+  const normalizedName = normalizeItemEvidenceText(item.name);
+  if (!normalizedName) return false;
+  if (deterministicItems.some((candidate) =>
+    normalizeItemEvidenceText(candidate.name) === normalizedName && candidate.quantity === item.quantity)) return true;
+
+  const lines = sourceText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const namePrefix = normalizedName.split(' ').slice(0, 3).join(' ');
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!normalizeItemEvidenceText(lines[index]).includes(namePrefix)) continue;
+    const nearbyRows = lines.slice(index, index + 3).join(' ');
+    if (!normalizeItemEvidenceText(nearbyRows).includes(normalizedName)) continue;
+    // New or quantity-corrected AI rows are accepted only when the same row
+    // block explicitly contains that exact quantity. This prevents nearby
+    // timestamps, subtotals, and delivery headings from donating quantities.
+    const details = lines.slice(index, index + 4).join(' ');
+    const quantities = [...details.matchAll(/(?:qty|quantity)(?:\s+ordered)?\s*[:#=.-]?\s*(\d{1,3})\b/gi)]
+      .map((match) => Number.parseInt(match[1], 10));
+    if (quantities.includes(item.quantity)) return true;
+  }
+  return false;
+}
+
+function normalizeItemEvidenceText(value: string): string {
+  return value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 export function buildRedactedEnrichmentInput(input: {

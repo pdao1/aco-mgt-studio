@@ -3,7 +3,7 @@ import type { OrderEnrichmentInput, OrderEnrichmentProvider, OrderItemReviewInpu
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const ORDER_REVIEW_PROMPT_VERSION = 'order-repair.v1';
-const ITEM_REVIEW_PROMPT_VERSION = 'order-items-repair.v2';
+const ITEM_REVIEW_PROMPT_VERSION = 'order-items-repair.v3';
 
 const orderReviewSchema = {
   type: 'object',
@@ -114,6 +114,8 @@ export class OpenAIOrderEnrichmentProvider implements OrderEnrichmentProvider {
         'Extract purchasable line items from the supplied email text and correct the deterministic candidate when it contains links or template noise.',
         'Never include headings, category labels, recommendations, navigation, calls to action, policy copy, CSS/HTML fragments, or prose.',
         'Use only names, quantities, and prices explicitly present in a product row. Never infer a price or quantity.',
+        'Ignore timestamps, delivery-information headings, subtotal labels, shipping/address blocks, and every quantity that is not attached to the product row.',
+        'Every returned product name and quantity must be traceable to one specific row in the supplied email text. Do not copy quantities from nearby sections.',
         'If the text is ambiguous, return an empty items array. A clean empty result is better than a false item.',
         'Prices are integer cents. Use null when a row does not explicitly provide that price.',
         input.repairFeedback || 'No previous repair feedback. Keep only actual purchased rows.',

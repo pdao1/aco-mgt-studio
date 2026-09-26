@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildRedactedEnrichmentInput, validateEnrichedOrder } from '../server/workflows/order-enrichment.js';
+import { buildRedactedEnrichmentInput, validateEnrichedItems, validateEnrichedOrder } from '../server/workflows/order-enrichment.js';
 import { runOrderIngestion } from '../server/workflows/order-ingestion.js';
 import type { ParsedOrderEmail } from '../server/email/parser.js';
 import type { Repository } from '../server/database/repository.js';
@@ -10,6 +10,31 @@ afterEach(() => {
 });
 
 describe('order enrichment boundary', () => {
+  it('accepts AI item rows only when names and quantities are grounded in nearby email text', () => {
+    const source = [
+      'Order number: BB-12008',
+      '2026-09-22 02:19:27 PST',
+      'Qty 25',
+      'Your product and delivery information',
+      'Qty 25',
+      'Pokémon Trading Card Game ETB',
+      'Qty 2',
+    ].join('\n');
+    const reviewed = validateEnrichedItems({
+      items: [
+        { name: '2026-09-22 02:19:27 PST', quantity: 25, unitPriceCents: null, totalCents: null },
+        { name: 'Your product and delivery information', quantity: 25, unitPriceCents: null, totalCents: null },
+        { name: 'Pokémon Trading Card Game ETB', quantity: 25, unitPriceCents: null, totalCents: null },
+        { name: 'Pokémon Trading Card Game ETB', quantity: 2, unitPriceCents: null, totalCents: null },
+        { name: 'Pokémon Trading Card Game ETB', quantity: 2, unitPriceCents: null, totalCents: null },
+      ],
+    }, source, []);
+
+    expect(reviewed).toEqual([
+      { name: 'Pokémon Trading Card Game ETB', quantity: 2, unitPriceCents: null, totalCents: null },
+    ]);
+  });
+
   it('does not finalize unmatched mail when AI repair has no budget or the provider fails', async () => {
     const repository = { recordMessage: vi.fn() };
     const email = { messageId: '<deferred>', fromAddress: 'orders@target.com', fromName: 'Target',
@@ -81,7 +106,7 @@ describe('order enrichment boundary', () => {
       fromAddress: 'orders@walmart.com',
       fromName: 'Walmart',
       subject: 'Your order is confirmed',
-      text: 'Order number: 200001234567890',
+      text: 'Order number: 200001234567890\nApple AirPods 4\nQty 1',
       html: null,
       receivedAt: deterministic.orderedAt,
     }, {

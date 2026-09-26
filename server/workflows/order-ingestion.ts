@@ -91,14 +91,14 @@ export async function runOrderIngestion(
           console.warn(`[order-enrichment] item review skipped provider=${enricher.name} reason=${safeErrorMessage(error)}`);
           break;
         }
-        const items = validateEnrichedItems(reviewed);
+        const items = validateEnrichedItems(reviewed, email.text, deterministic.items);
         if (items) {
           normalized = {
             ...deterministic,
             items,
-            itemCount: items.length > 0
-              ? items.reduce((total, item) => total + item.quantity, 0)
-              : deterministic.itemCount,
+            // An empty reviewed result is meaningful: do not retain a
+            // deterministic count that may have been computed from false rows.
+            itemCount: items.reduce((total, item) => total + item.quantity, 0) || null,
           };
           itemReviewAccepted = true;
           break;

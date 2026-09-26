@@ -138,6 +138,56 @@ describe('parser feedback persistence', () => {
     expect((await repository.dashboard(workspaceId)).orders[0].status).toBe('delivered');
   });
 
+  it('replaces stale item rows when a parser upgrade revisits an item section', async () => {
+    const email = {
+      messageId: 'order-needs-item-repair',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Your order is confirmed',
+      text: [
+        'Order number: REPARSE-1009',
+        'Items purchased',
+        '2026-09-22 02:19:27 PST',
+        'Qty 25',
+        'Your product and delivery information',
+        'Qty 25',
+        'Pokémon Trading Card Game ETB',
+        'Qty 1',
+        'Order timeline',
+      ].join('\n'),
+      html: null,
+      receivedAt: new Date('2026-09-22T10:19:27Z'),
+    };
+    const parsed = parseOrderEmail(email)!;
+    const meta = {
+      messageKey: email.messageId,
+      fromAddress: email.fromAddress,
+      subject: email.subject,
+      receivedAt: email.receivedAt,
+      redactedExcerpt: email.text,
+      parserVersion: 'mailbox.v3',
+    };
+    await repository.recordMessage(workspaceId, customerId, meta, {
+      ...parsed,
+      itemCount: 75,
+      items: [
+        { name: '2026-09-22 02:19:27 PST', quantity: 25, unitPriceCents: null, totalCents: null },
+        { name: 'Your product and delivery information', quantity: 25, unitPriceCents: null, totalCents: null },
+        { name: 'Pokémon Trading Card Game ETB', quantity: 25, unitPriceCents: null, totalCents: null },
+      ],
+    });
+    await repository.recordMessage(workspaceId, customerId, {
+      ...meta,
+      parserVersion: MAILBOX_PARSER_VERSION,
+    }, parsed);
+
+    const repaired = (await repository.dashboard(workspaceId)).orders.find((order) => order.orderNumber === 'REPARSE-1009');
+    expect(repaired).toMatchObject({
+      itemCount: 1,
+      items: [{ name: 'Pokémon Trading Card Game ETB', quantity: 1 }],
+    });
+  });
+
   it('removes inbox-scoped deduplication and order data before reconnection', async () => {
     const input = { name: 'Reconnect test', gmailAddress: 'reconnect@gmail.com', syncDays: 365, secretCiphertext: 'test' };
     const old = await repository.createCustomer(workspaceId, input);

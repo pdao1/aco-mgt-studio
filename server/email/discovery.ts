@@ -1,6 +1,6 @@
 // Bump when extraction/discovery rules change so saved no-match decisions do
 // not permanently hide mail from an improved parser.
-export const MAILBOX_PARSER_VERSION = 'mailbox.v3';
+export const MAILBOX_PARSER_VERSION = 'mailbox.v4';
 
 const retailerDomains = [
   'target.com', 'amazon.com', 'walmart.com', 'bestbuy.com', 'nike.com',

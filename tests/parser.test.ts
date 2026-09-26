@@ -430,6 +430,115 @@ describe('parseOrderEmail', () => {
     expect(parsed?.itemCount).toBe(2);
   });
 
+  it('formats a Target ship-to address through ZIP and strips appended click tracking URLs', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<target-address-click-url@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      subject: 'Your order is confirmed',
+      text: [
+        'Order number: 912003774472093',
+        'Items purchased',
+        'Pokémon Trading Card Game',
+        'Qty 1',
+        'Delivers to PHUNG DAO, 665 HALEKAUWILA STREET, APARTMENT 307, HONOLULU, HI 96813, https://click.oe1.target.com/?qs=ABBT1nYiOjEsmQioJ',
+        'Order timeline',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.shippingAddress).toBe('PHUNG DAO, 665 HALEKAUWILA STREET, APARTMENT 307, HONOLULU, HI 96813');
+    expect(parsed?.shippingAddress).toMatch(/\b\d{5}(?:-\d{4})?$/);
+  });
+
+  it('ignores order timestamps, delivery headings, and item subtotals as purchased products', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<noisy-retailer-order-details@example>',
+      fromAddress: 'orders@example.com',
+      fromName: 'Best Buy',
+      subject: 'Order confirmation BB-12008',
+      text: [
+        'Order number: BB-12008',
+        'Items purchased',
+        '2026-09-22 02:19:27 PST',
+        'Qty 25',
+        'Your product and delivery information',
+        'Qty 25',
+        'Mixed Gradient Color Glitter Clear Back Panel Plate Graded Card Slab TPU Bumper Guard Plate',
+        'Qty 1',
+        'Item subtotal: USD 62.50',
+        'Qty 120',
+        'Double Back Panel Plate Gradient Color Glitter TPU Graded Card Slab Protector',
+        'Qty 1',
+        'Order timeline',
+      ].join('\n'),
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.items).toEqual([
+      { name: 'Mixed Gradient Color Glitter Clear Back Panel Plate Graded Card Slab TPU Bumper Guard Plate', quantity: 1, unitPriceCents: null, totalCents: null },
+      { name: 'Double Back Panel Plate Gradient Color Glitter TPU Graded Card Slab Protector', quantity: 1, unitPriceCents: null, totalCents: null },
+    ]);
+    expect(parsed?.itemCount).toBe(2);
+  });
+
+  it('passes the noisy receipt regression corpus without adding adjacent filler as items', () => {
+    const noiseRows = [
+      '2026-09-22 02:19:27 PST',
+      'Your product and delivery information',
+      'Item subtotal: USD 62.50',
+      'Delivers to',
+      'PHUNG DAO, 665 HALEKAUWILA STREET, APARTMENT 307, HONOLULU, HI 96813',
+      'https://click.oe1.target.com/?qs=ABBT1nYiOjE',
+      'View order details',
+      'Canceled item',
+      'Purchase total: $62.50',
+      'Order timeline',
+      'Shipment arriving soon',
+      'Rewards summary',
+      'Order created on Sep 22',
+      'Need help with your order?',
+      'Questions? Contact us',
+      'Order summary',
+      'Important information about your order',
+      'Get your order details',
+      'Your purchase receipt',
+      'Status: Processing',
+      'Payment method: Visa',
+      'Estimated delivery: September 25',
+      'Subtotal: $62.50',
+      'Thanks for shopping with us',
+    ];
+
+    const results = noiseRows.map((noise, index) => {
+      const orderNumber = 'EX-' + (12010 + index);
+      const parsed = parseOrderEmail({
+        messageId: '<noise-corpus-' + index + '@example>',
+        fromAddress: 'orders@example.com',
+        fromName: 'Example Store',
+        subject: 'Order confirmation ' + orderNumber,
+        text: [
+          'Order number: ' + orderNumber,
+          'Items purchased',
+          'Authentic Pokémon ETB product',
+          'Qty 2',
+          noise,
+          'Qty 25',
+          'Order timeline',
+        ].join('\n'),
+        html: null,
+        receivedAt,
+      });
+      return parsed?.items;
+    });
+
+    expect(results).toEqual(noiseRows.map(() => [
+      { name: 'Authentic Pokémon ETB product', quantity: 2, unitPriceCents: null, totalCents: null },
+    ]));
+  });
+
   it('captures the original To header, shipping destination, and masked payment details', () => {
     const parsed = parseOrderEmail({
       messageId: '<order-metadata@example>',

@@ -172,18 +172,43 @@ function findShippingAddress(lines: string[]): string | null {
     if (!match) continue;
     const addressLines = match[1] ? [match[1].trim()] : [];
     for (let next = index + 1; next < lines.length && addressLines.length < 5; next += 1) {
-      const line = lines[next];
+      // Target and similar templates append a tracked click-through URL to
+      // the same flattened text row as the destination. It is not address data.
+      const line = lines[next].replace(/https?:\/\/\S+/gi, ' ').replace(/\bwww\.\S+/gi, ' ').trim();
+      if (!line) continue;
       if (boundary.test(line)) break;
       // Email and phone values are not part of a shipping destination.
       if (/^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/.test(line) || /^(?:phone|email)\s*:/i.test(line)) break;
       addressLines.push(line);
     }
-    const address = addressLines.join(', ').replace(/\s+/g, ' ').trim().slice(0, 500);
+    const address = formatShippingAddress(addressLines.join(', '));
     if (address && /\d/.test(address) && /(?:\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|highway|hwy\.?|parkway|pkwy\.?|unit|suite|ste\.?|apartment|apt\.?|p\.?\s?o\.?\s?box)\b|,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b)/i.test(address)) {
       return address;
     }
   }
   return null;
+}
+
+function formatShippingAddress(value: string): string {
+  const cleaned = value
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\bwww\.\S+/gi, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/(?:,\s*){2,}/g, ', ')
+    .trim();
+  // Stop at the postal code even when the MIME text flattener appends a
+  // tracking/analytics URL or another table cell after the address.
+  const stateAndZip = cleaned.match(/,\s*[A-Z]{2}\s+(\d{5}(?:-\d{4})?)\b/);
+  const postalCodes = [...cleaned.matchAll(/\b\d{5}(?:-\d{4})?\b/g)];
+  const zip = postalCodes.at(-1);
+  const endIndex = stateAndZip?.index !== undefined
+    ? stateAndZip.index + stateAndZip[0].length
+    : zip?.index !== undefined
+      ? zip.index + zip[0].length
+      : cleaned.length;
+  const formatted = cleaned.slice(0, endIndex);
+  return formatted.replace(/[\s,;]+$/g, '').slice(0, 500);
 }
 
 function findPaymentLines(lines: string[]): string[] {
@@ -491,11 +516,15 @@ function isMetadataLine(value: string): boolean {
   const line = value.trim();
   return isStandaloneMetadataLabel(line)
     || /^(?:order|purchase|confirmation)\s*(?:number|no\.?|#|id)\b/i.test(line)
-    || /^(?:subtotal|shipping(?:\s*(?:&|and)\s*handling|\s+(?:fee|cost|handling))?|delivery(?:\s+(?:fee|cost))?|tax|grand\s+total|order\s+total|total)\b\s*[:#=-]?\s*(?:(?:USD\s*)?[$€£]\s*)?[\d,]+(?:\.\d{2})?/i.test(line)
+    || /^(?:subtotal|shipping(?:\s*(?:&|and)\s*handling|\s+(?:fee|cost|handling))?|delivery(?:\s+(?:fee|cost))?|tax|grand\s+total|order\s+total|purchase\s+total|total)\b\s*[:#=-]?\s*(?:(?:USD\s*)?[$€£]\s*)?[\d,]+(?:\.\d{2})?/i.test(line)
     || /^(?:delivers?|delivered|ships?|shipping|delivery)\s+to\b/i.test(line)
     || /^(?:shipping|billing)\s+address\b/i.test(line)
     || /^(?:tracking\s*(?:number|no\.?|#|id)?|status|date|email|phone|credit\s+card|recipient|payment(?:\s+(?:method|details?))?|billing(?:\s+details?)?)\s*[:#=-]/i.test(line)
     || /^(?:qty|quantity)(?:\s+ordered)?\s*[:#=.-]?\s*(?:\|\s*)?\d{1,3}\b/i.test(line)
+    || /^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s+[A-Z]{2,5})?$/i.test(line)
+    || /^(?:your\s+)?product\s+and\s+delivery\s+information\b/i.test(line)
+    || /^item\s+subtotal\b/i.test(line)
+    || /^(?:shipment\s+arriving|rewards?\s+summary|order\s+created\s+on|need\s+help\b|questions?\s*\?|important\s+information\b|get\s+your\s+order\s+details|your\s+purchase\s+receipt|estimated\s+delivery\b|thanks?\s+for\s+shopping\b)/i.test(line)
     || /^(?:(?:order|purchased)\s+)?(?:items?|products?)(?:\s+(?:purchased|ordered))?(?:\s*[:#-]?\s*\(?\d{1,3}\)?)?$/i.test(line);
 }
 
@@ -528,7 +557,7 @@ function findQuantityMatch(value: string): RegExpMatchArray | null {
 
 function isItemSectionBoundary(value: string): boolean {
   const line = value.trim();
-  if (/^(?:payment|billing|shipping\s+address|billing\s+address|order\s+timeline|view\s+(?:order|cart|details?)|cancel(?:led|ed)\s+item)\b/i.test(line)) return true;
+  if (/^(?:payment|billing|shipping\s+address|billing\s+address|delivers?\s+to|delivered\s+to|ships?\s+to|order\s+timeline|view\s+(?:order|cart|details?)|cancel(?:led|ed)\s+item)\b/i.test(line)) return true;
   return /^(?:subtotal|shipping(?:\s*(?:&|and)\s*handling|\s+(?:fee|cost|handling))?|delivery(?:\s+(?:fee|cost))?|tax|grand\s+total|order\s+total)(?:\s*[:#-]?\s*(?:(?:USD\s*)?[$€£]\s*[\d,]+(?:\.\d{2})?|free))?$/i.test(line);
 }
 
@@ -548,7 +577,11 @@ function isNonProductLine(value: string): boolean {
     // merchandise. Reject them before quantity look-ahead can turn them into
     // a fake product row (for example Target's click.oe.target.com links).
     || /https?:\/\/|www\.|\b(?:href|qs)=/i.test(value)
-    || /(?:click\.oe\.target\.com|[?&][a-z0-9_-]+=)/i.test(value);
+    || /(?:click\.oe\.target\.com|[?&][a-z0-9_-]+=)/i.test(value)
+    || /^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s+[A-Z]{2,5})?$/i.test(value.trim())
+    || /^(?:your\s+)?product\s+and\s+delivery\s+information\b/i.test(value.trim())
+    || /^item\s+subtotal\b/i.test(value.trim())
+    || /^(?:shipment\s+arriving|rewards?\s+summary|order\s+created\s+on|need\s+help\b|questions?\s*\?|important\s+information\b|get\s+your\s+order\s+details|your\s+purchase\s+receipt|estimated\s+delivery\b|thanks?\s+for\s+shopping\b)/i.test(value.trim());
 }
 
 function hasItemEvidence(value: string): boolean {
