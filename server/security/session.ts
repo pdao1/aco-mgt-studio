@@ -73,15 +73,23 @@ export function requireSession(secret: string) {
   };
 }
 
-export function enforceOrigin(appOrigin: string) {
+export function enforceOrigin(appOrigin: string, allowedAliases: readonly string[] = []) {
+  const allowedOrigins = new Set([appOrigin, ...allowedAliases].map((value) => new URL(value).origin));
   return (request: Request, response: Response, next: NextFunction) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       next();
       return;
     }
     const origin = request.get('origin');
-    if (origin && origin.replace(/\/$/, '') !== appOrigin) {
-      response.status(403).json({ error: 'INVALID_ORIGIN', message: 'This request origin is not allowed.' });
+    let requestOrigin: string | null = null;
+    if (origin) {
+      try {
+        const parsed = new URL(origin);
+        if (parsed.origin === origin) requestOrigin = parsed.origin;
+      } catch { /* Reject malformed Origin headers below. */ }
+    }
+    if (origin && (!requestOrigin || !allowedOrigins.has(requestOrigin))) {
+      response.status(403).json({ error: 'INVALID_ORIGIN', message: `This request origin is not allowed. Open ${appOrigin} and try again.` });
       return;
     }
     next();

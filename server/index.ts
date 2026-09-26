@@ -150,7 +150,9 @@ app.post('/api/whop/webhook', express.raw({ type:'application/json', limit:'256k
 });
 app.use(express.json({ limit: '32kb' }));
 app.use(cookieParser());
-app.use(enforceOrigin(config.appOrigin));
+app.use(enforceOrigin(config.appOrigin, config.nodeEnv === 'production'
+  ? ['https://ordertracker.pro', 'https://www.ordertracker.pro']
+  : []));
 if (config.nodeEnv === 'production') {
   app.use((request, response, next) => {
     if (request.protocol !== 'https') {
