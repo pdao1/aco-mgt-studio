@@ -6,6 +6,8 @@ export interface EmailInput {
   messageId: string | null;
   fromAddress: string;
   fromName: string | null;
+  /** Original RFC 5322 To header as formatted by the mail parser. */
+  emailTo?: string | null;
   subject: string;
   text: string;
   html: string | null;
@@ -26,6 +28,10 @@ export interface ParsedOrderEmail {
   orderedAt: Date;
   itemCount: number | null;
   items: ParsedOrderItem[];
+  emailTo: string | null;
+  shippingAddress: string | null;
+  paymentMethodType: string | null;
+  paymentLast4: string | null;
 }
 
 export interface ParsedOrderItem {
@@ -114,6 +120,7 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
   const orderNumber = historicalOrderNumber ?? firstOrderNumber(plain);
   const tracking = findTracking(plain);
   const items = parseItems(plain);
+  const orderMetadata = parseOrderMetadata(input.emailTo, plain);
   const messageKey = input.messageId?.trim() || createHash('sha256')
     .update(`${input.fromAddress}\0${input.subject}\0${input.receivedAt.toISOString()}\0${plain.slice(0, 2000)}`)
     .digest('hex');
@@ -134,7 +141,96 @@ export function parseOrderEmail(input: EmailInput, context: EmailParseContext = 
     orderedAt: input.receivedAt,
     itemCount: items.length > 0 ? items.reduce((total, item) => total + item.quantity, 0) : parseItemCount(plain),
     items,
+    ...orderMetadata,
   };
+}
+
+/** Extract user-requested order contact, destination, and masked payment data locally. */
+export function extractOrderMetadata(input: Pick<EmailInput, 'emailTo' | 'text' | 'html'>) {
+  return parseOrderMetadata(input.emailTo, normalizeText(`${input.text}\n${stripHtml(input.html ?? '')}`));
+}
+
+function parseOrderMetadata(emailTo: string | null | undefined, text: string) {
+  const safeEmailTo = typeof emailTo === 'string'
+    ? emailTo.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) || null
+    : null;
+  const lines = text.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const paymentLines = findPaymentLines(lines);
+  return {
+    emailTo: safeEmailTo,
+    shippingAddress: findShippingAddress(lines),
+    paymentMethodType: parsePaymentMethodType(paymentLines),
+    paymentLast4: parsePaymentLast4(paymentLines),
+  };
+}
+
+function findShippingAddress(lines: string[]): string | null {
+  const heading = /^(?:(?:shipping|delivery)\s+address|ship(?:ped)?\s+to|deliver(?:s|ed)?\s+to)\s*:?\s*(.*)$/i;
+  const boundary = /^(?:items?\s+(?:purchased|ordered)|products?\s+(?:purchased|ordered)|order\s+timeline|payment(?:\s|$)|billing(?:\s|$)|(?:purchase|order)\s+total|subtotal|tax|grand\s+total|status\b|tracking\b|expected\s+delivery\b|delivery\s+method\b|placed\b)/i;
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(heading);
+    if (!match) continue;
+    const addressLines = match[1] ? [match[1].trim()] : [];
+    for (let next = index + 1; next < lines.length && addressLines.length < 5; next += 1) {
+      const line = lines[next];
+      if (boundary.test(line)) break;
+      // Email and phone values are not part of a shipping destination.
+      if (/^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/.test(line) || /^(?:phone|email)\s*:/i.test(line)) break;
+      addressLines.push(line);
+    }
+    const address = addressLines.join(', ').replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (address && /\d/.test(address) && /(?:\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|highway|hwy\.?|parkway|pkwy\.?|unit|suite|ste\.?|apartment|apt\.?|p\.?\s?o\.?\s?box)\b|,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b)/i.test(address)) {
+      return address;
+    }
+  }
+  return null;
+}
+
+function findPaymentLines(lines: string[]): string[] {
+  const result: string[] = [];
+  const paymentHeading = /^(?:payment(?:\s+(?:method|details?))?|paid\s+with|charged\s+to)\s*:?\s*(.*)$/i;
+  const paymentBoundary = /^(?:items?\s+(?:purchased|ordered)|order\s+timeline|shipping(?:\s+address)?|delivery\s+address|subtotal|grand\s+total|order\s+total|status|tracking)\b/i;
+  for (let index = 0; index < lines.length; index += 1) {
+    const heading = lines[index].match(paymentHeading);
+    if (heading) {
+      if (heading[1]) result.push(heading[1]);
+      for (let next = index + 1; next < lines.length && next <= index + 2; next += 1) {
+        if (paymentBoundary.test(lines[next])) break;
+        result.push(lines[next]);
+      }
+    } else if (/(?:\b(?:visa|master\s?card|mastercard|american\s+express|amex|discover|paypal|apple\s+pay|google\s+pay|shop\s+pay|klarna|afterpay|venmo)\b.*(?:ending|ends?\s+in|last\s+(?:four|4)|[*•·xX]{2,})|\b(?:credit|debit)\s+card\b)/i.test(lines[index])) {
+      result.push(lines[index]);
+    }
+  }
+  return result.slice(0, 6);
+}
+
+function parsePaymentMethodType(lines: string[]): string | null {
+  const text = lines.join(' ');
+  const methods: Array<[RegExp, string]> = [
+    [/\b(?:american\s+express|amex)\b/i, 'American Express'],
+    [/\bmaster\s?card\b/i, 'Mastercard'],
+    [/\bvisa\b/i, 'Visa'],
+    [/\bdiscover\b/i, 'Discover'],
+    [/\bpaypal\b/i, 'PayPal'],
+    [/\bapple\s+pay\b/i, 'Apple Pay'],
+    [/\bgoogle\s+pay\b/i, 'Google Pay'],
+    [/\bshop\s+pay\b/i, 'Shop Pay'],
+    [/\bklarna\b/i, 'Klarna'],
+    [/\b(?:afterpay|clearpay)\b/i, 'Afterpay'],
+    [/\bvenmo\b/i, 'Venmo'],
+    [/\bdebit\s+card\b/i, 'Debit card'],
+    [/\bcredit\s+card\b/i, 'Credit card'],
+  ];
+  return methods.find(([pattern]) => pattern.test(text))?.[1] ?? null;
+}
+
+function parsePaymentLast4(lines: string[]): string | null {
+  for (const line of lines) {
+    const match = line.match(/(?:ending(?:\s+in)?|ends?\s+in|last\s+(?:four|4)(?:\s+digits?)?|[*•·xX]{2,})\s*[:#-]?\s*(\d{4})\b/i);
+    if (match) return match[1];
+  }
+  return null;
 }
 
 /** Do not spend parser/AI work on login verification and one-time PIN mail. */

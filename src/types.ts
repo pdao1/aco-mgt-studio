@@ -87,6 +87,10 @@ export interface Order {
   trackingNumber: string | null;
   trackingUrl: string | null;
   expectedDelivery: string | null;
+  emailTo: string | null;
+  shippingAddress: string | null;
+  paymentMethodType: string | null;
+  paymentLast4: string | null;
   events: OrderEvent[];
 }
 

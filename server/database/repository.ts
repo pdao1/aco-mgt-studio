@@ -305,6 +305,10 @@ export class Repository {
         tracking_number: string | null;
         tracking_url: string | null;
         expected_delivery: Date | null;
+        email_to: string | null;
+        shipping_address: string | null;
+        payment_method_type: string | null;
+        payment_last4: string | null;
       }>(`
         SELECT o.id, o.customer_id, o.merchant, o.order_number, o.ordered_at,
                o.total_cents, o.fee_basis_points, o.fee_basis, o.custom_fee_basis_cents,
@@ -312,7 +316,8 @@ export class Repository {
                o.status_override, o.override_note, o.override_updated_at, o.billing_invoice_id,
                o.archived_at, o.hidden_item_keys,
                i.status AS billing_status,
-               s.carrier, s.tracking_number, s.tracking_url, s.expected_delivery
+               s.carrier, s.tracking_number, s.tracking_url, s.expected_delivery,
+               o.email_to, o.shipping_address, o.payment_method_type, o.payment_last4
         FROM orders o
         LEFT JOIN invoices i
           ON i.workspace_id = o.workspace_id AND i.id = o.billing_invoice_id
@@ -421,6 +426,10 @@ export class Repository {
             trackingNumber: order.tracking_number,
             trackingUrl: order.tracking_url,
             expectedDelivery: order.expected_delivery?.toISOString() ?? null,
+            emailTo: order.email_to,
+            shippingAddress: order.shipping_address,
+            paymentMethodType: order.payment_method_type,
+            paymentLast4: order.payment_last4,
             events,
           };
         }),
@@ -1323,8 +1332,9 @@ export class Repository {
         const orderResult = await client.query<{ id: string }>(`
           INSERT INTO orders(
             id, workspace_id, customer_id, merchant, order_number, ordered_at,
-            total_cents, item_count, items, currency, status, source_message_key
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            total_cents, item_count, items, currency, status, source_message_key,
+            email_to, shipping_address, payment_method_type, payment_last4
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           ON CONFLICT (workspace_id, customer_id, merchant, order_number) DO UPDATE SET
             ordered_at = LEAST(orders.ordered_at, EXCLUDED.ordered_at),
             total_cents = COALESCE(EXCLUDED.total_cents, orders.total_cents),
@@ -1345,11 +1355,16 @@ export class Repository {
               ELSE orders.status
             END,
             source_message_key = EXCLUDED.source_message_key,
+            email_to = COALESCE(orders.email_to, EXCLUDED.email_to),
+            shipping_address = COALESCE(EXCLUDED.shipping_address, orders.shipping_address),
+            payment_method_type = COALESCE(EXCLUDED.payment_method_type, orders.payment_method_type),
+            payment_last4 = COALESCE(EXCLUDED.payment_last4, orders.payment_last4),
             updated_at = now()
           RETURNING id
         `, [
           candidateId, workspaceId, customerId, parsed.merchant, orderNumber, parsed.orderedAt,
           parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.currency, parsed.status, parsed.messageKey,
+          parsed.emailTo, parsed.shippingAddress, parsed.paymentMethodType, parsed.paymentLast4,
         ]);
         orderId = orderResult.rows[0].id;
       } else {
@@ -1370,9 +1385,14 @@ export class Repository {
                 THEN '[]'::jsonb
               ELSE items
             END,
+            email_to = COALESCE(email_to, $10),
+            shipping_address = COALESCE($11, shipping_address),
+            payment_method_type = COALESCE($12, payment_method_type),
+            payment_last4 = COALESCE($13, payment_last4),
             updated_at = now(), source_message_key = $8
           WHERE workspace_id = $1 AND customer_id = $2 AND id = $3
-        `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.messageKey, parsed.orderedAt]);
+        `, [workspaceId, customerId, orderId, parsed.status, parsed.totalCents, parsed.itemCount, JSON.stringify(parsed.items), parsed.messageKey, parsed.orderedAt,
+          parsed.emailTo, parsed.shippingAddress, parsed.paymentMethodType, parsed.paymentLast4]);
       }
 
       if (parsed.trackingNumber) {

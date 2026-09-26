@@ -40,3 +40,9 @@ export const maskTracking = (tracking: string | null) => {
   if (tracking.length <= 9) return tracking;
   return `${tracking.slice(0, 8)}••••${tracking.slice(-4)}`;
 };
+
+export const formatPaymentMethod = (type: string | null, last4: string | null) => {
+  if (type && last4) return `${type} ···· ${last4}`;
+  if (type) return type;
+  return last4 ? `···· ${last4}` : null;
+};

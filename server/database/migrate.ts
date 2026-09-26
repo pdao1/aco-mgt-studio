@@ -23,7 +23,7 @@ export async function runMigrations(databaseUrl: string, production = false) {
         applied_at timestamptz NOT NULL DEFAULT now()
       )
     `);
-    const migrations = ['001_initial', '002_fees_portal', '003_billing_overrides', '004_service_fee_tenancy', '005_beta_access_settings', '006_cancellation_matching', '007_order_items', '008_pending_order_status', '009_workspace_identity', '010_solo_buyers', '011_discord_whop', '012_parser_feedback', '013_solo_limits_feedback_patterns', '014_mailbox_parser_version', '015_whop_license_login', '016_whop_payment_suspension'];
+    const migrations = ['001_initial', '002_fees_portal', '003_billing_overrides', '004_service_fee_tenancy', '005_beta_access_settings', '006_cancellation_matching', '007_order_items', '008_pending_order_status', '009_workspace_identity', '010_solo_buyers', '011_discord_whop', '012_parser_feedback', '013_solo_limits_feedback_patterns', '014_mailbox_parser_version', '015_whop_license_login', '016_whop_payment_suspension', '017_order_contact_fulfillment_payment'];
     for (const name of migrations) {
       const existing = await client.query('SELECT 1 FROM app_migrations WHERE name = $1', [name]);
       if (existing.rowCount !== 0) continue;

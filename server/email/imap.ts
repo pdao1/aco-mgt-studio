@@ -184,6 +184,9 @@ export class MailboxSyncCoordinator {
               const from = parsedMail.from?.value[0];
               const parsedFromAddress = ('address' in (from ?? {}) ? from?.address : null) || fromAddress;
               const parsedFromName = ('name' in (from ?? {}) ? from?.name : null) || fromName;
+              const emailTo = Array.isArray(parsedMail.to)
+                ? parsedMail.to.map((entry) => entry.text).filter(Boolean).join(', ')
+                : parsedMail.to?.text ?? null;
               const parsedSubject = parsedMail.subject || subject;
               const parsedReceivedValue = parsedMail.date || receivedAt;
               const parsedReceivedDate = parsedReceivedValue instanceof Date ? parsedReceivedValue : new Date(parsedReceivedValue);
@@ -193,6 +196,7 @@ export class MailboxSyncCoordinator {
                 messageId: parsedMail.messageId || message.envelope?.messageId || null,
                 fromAddress: parsedFromAddress,
                 fromName: parsedFromName,
+                emailTo,
                 subject: parsedSubject,
                 text: parsedMail.text ?? '',
                 html,

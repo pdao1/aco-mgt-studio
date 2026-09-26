@@ -430,6 +430,51 @@ describe('parseOrderEmail', () => {
     expect(parsed?.itemCount).toBe(2);
   });
 
+  it('captures the original To header, shipping destination, and masked payment details', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<order-metadata@example>',
+      fromAddress: 'orders@target.com',
+      fromName: 'Target',
+      emailTo: 'Anh Dao <anh+target@gmail.com>',
+      subject: 'Your Target order is confirmed',
+      text: [
+        'Order number: 912003774472093',
+        'Items purchased',
+        'Pokémon Trading Card Game',
+        'Qty 2',
+        'Delivers to',
+        'Anh Dao, 3600 Aolele St, Unit #30234, Honolulu, HI 96820',
+        'Payment method',
+        'Visa ending in 4242',
+        'Order timeline',
+      ].join('\n'),
+      html: null,
+      receivedAt: new Date('2026-09-15T10:15:00.000Z'),
+    });
+
+    expect(parsed).toMatchObject({
+      emailTo: 'Anh Dao <anh+target@gmail.com>',
+      shippingAddress: 'Anh Dao, 3600 Aolele St, Unit #30234, Honolulu, HI 96820',
+      paymentMethodType: 'Visa',
+      paymentLast4: '4242',
+    });
+  });
+
+  it('does not extract unmasked payment numbers as a stored last four', () => {
+    const parsed = parseOrderEmail({
+      messageId: '<unmasked-payment@example>',
+      fromAddress: 'orders@example.com',
+      fromName: 'Example Store',
+      subject: 'Order EX-12007 confirmed',
+      text: 'Order number: EX-12007\nPayment method: Visa 4111111111111111',
+      html: null,
+      receivedAt,
+    });
+
+    expect(parsed?.paymentMethodType).toBe('Visa');
+    expect(parsed?.paymentLast4).toBeNull();
+  });
+
   it('does not promote recommendation headings or CSS fragments to purchased items', () => {
     const parsed = parseOrderEmail({
       messageId: '<noisy-items@example>',

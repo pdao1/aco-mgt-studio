@@ -66,13 +66,13 @@ describe.skipIf(!url)('Solo Buyer service boundary (PostgreSQL + HTTP)',()=>{
     expect(stored.secretCiphertext).not.toContain('abcdefghijklmnop');
     expect(secretBox.decrypt(stored.secretCiphertext)).toBe('abcdefghijklmnop');
     const otherMailbox=await core.createCustomer(other!.workspaceId,{name:'Other inbox',gmailAddress:`other-${suffix}@gmail.com`,syncDays:30,secretCiphertext:secretBox.encrypt('qrstuvwxyzabcdef')},2);
-    const parsed:ParsedOrderEmail={messageKey:randomUUID(),merchant:'Pokemon Center',orderNumber:'MY-ORDER-1001',status:'shipped',totalCents:5999,currency:'USD',trackingNumber:'1Z9999999999999999',carrier:'UPS',trackingUrl:'https://www.ups.com/track?tracknum=1Z9999999999999999',expectedDelivery:null,orderedAt:new Date(),itemCount:1,items:[{name:'Elite Trainer Box',quantity:1,unitPriceCents:5999,totalCents:5999}]};
+    const parsed:ParsedOrderEmail={messageKey:randomUUID(),merchant:'Pokemon Center',orderNumber:'MY-ORDER-1001',status:'shipped',totalCents:5999,currency:'USD',trackingNumber:'1Z9999999999999999',carrier:'UPS',trackingUrl:'https://www.ups.com/track?tracknum=1Z9999999999999999',expectedDelivery:null,orderedAt:new Date(),itemCount:1,emailTo:'Buyer <buyer+target@example.com>',shippingAddress:'3600 Aolele St, Honolulu, HI 96820',paymentMethodType:'Visa',paymentLast4:'4242',items:[{name:'Elite Trainer Box',quantity:1,unitPriceCents:5999,totalCents:5999}]};
     const meta={messageKey:parsed.messageKey,fromAddress:'orders@example.com',subject:'Order shipped',receivedAt:parsed.orderedAt};
     await core.recordMessage(account!.workspaceId,mailbox.id,meta,parsed);
     await core.recordMessage(other!.workspaceId,otherMailbox.id,meta,{...parsed,orderNumber:'PRIVATE-ORDER-2002',status:'delivered'});
     const response=await request('/api/solo/dashboard');const payload=await response.json() as SoloDashboard;
     expect(payload.mailboxes).toHaveLength(1);expect(payload.mailboxes[0].name).toBe('My inbox');
-    expect(payload.orders).toHaveLength(1);expect(payload.orders[0]).toMatchObject({orderNumber:'MY-ORDER-1001',status:'shipped',trackingNumber:parsed.trackingNumber});
+    expect(payload.orders).toHaveLength(1);expect(payload.orders[0]).toMatchObject({orderNumber:'MY-ORDER-1001',status:'shipped',trackingNumber:parsed.trackingNumber,emailTo:parsed.emailTo,shippingAddress:parsed.shippingAddress,paymentMethodType:'Visa',paymentLast4:'4242'});
     for(const field of ['feePercent','feeBasis','customBasisCents','feeBasisCents','feeCents','billingStatus','invoiceId']) expect(payload.orders[0]).not.toHaveProperty(field);
     expect(JSON.stringify(payload)).not.toContain('PRIVATE-ORDER-2002');
     expect(payload).not.toHaveProperty('invoices');expect(payload).not.toHaveProperty('workspace');

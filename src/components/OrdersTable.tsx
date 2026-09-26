@@ -4,7 +4,7 @@ import { SiAdidas, SiNike, SiStockx, SiTarget } from 'react-icons/si';
 import { TbBrandWalmart } from 'react-icons/tb';
 import type { IconType } from 'react-icons';
 import type { Order, OrderStatus } from '../types';
-import { formatDate, formatMoney, formatPercent, maskTracking, titleCaseStatus } from '../lib/format';
+import { formatDate, formatMoney, formatPaymentMethod, formatPercent, maskTracking, titleCaseStatus } from '../lib/format';
 import { filterOrders, listRetailers } from '../lib/orders';
 
 export type OrderFilter = 'all' | OrderStatus;
@@ -62,6 +62,10 @@ export function StoreMark({ store }: { store: string }) {
     .slice(0, 2)
     .toUpperCase();
   return <span className={`store-mark ${slug}`} aria-hidden="true">{Icon ? <Icon size={18} /> : letters}</span>;
+}
+
+export function OrderMetadataCell({ value }: { value: string | null }) {
+  return <td><span className="order-metadata-cell" title={value ?? undefined}>{value ?? '—'}</span></td>;
 }
 
 export function OrdersTable({
@@ -153,6 +157,9 @@ export function OrdersTable({
             <tr>
               <th>Store</th>
               <th>Order</th>
+              <th>To alias</th>
+              <th>Ship to</th>
+              <th>Payment</th>
               <th className="sorted-column">Ordered {sortDirection === 'desc' ? <ArrowDown size={13} /> : <ArrowUp size={13} />}</th>
               <th>Purchase total</th>
               <th>Fee basis</th>
@@ -188,6 +195,9 @@ export function OrdersTable({
                     </div>
                   </details>
                 </td>
+                <OrderMetadataCell value={order.emailTo} />
+                <OrderMetadataCell value={order.shippingAddress} />
+                <OrderMetadataCell value={formatPaymentMethod(order.paymentMethodType, order.paymentLast4)} />
                 <td>{formatDate(order.orderedAt)}</td>
                 <td>{formatMoney(order.totalCents, order.currency)}</td>
                 <td><span className="fee-cell">{formatMoney(order.feeBasisCents, order.currency)} <small>{order.feeBasis === 'checkout_total' ? 'Checkout total' : 'Custom amount'}</small></span></td>

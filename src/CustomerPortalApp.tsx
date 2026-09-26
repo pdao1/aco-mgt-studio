@@ -1,9 +1,9 @@
 import { ExternalLink, PackageCheck, ShieldCheck, ShoppingBag, Truck, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { api, ApiError } from './lib/api';
-import { formatDate, formatDateTime, formatMoney, formatPercent, maskTracking } from './lib/format';
+import { formatDate, formatDateTime, formatMoney, formatPaymentMethod, formatPercent, maskTracking } from './lib/format';
 import { filterOrders, listRetailers } from './lib/orders';
-import { StoreMark } from './components/OrdersTable';
+import { OrderMetadataCell, StoreMark } from './components/OrdersTable';
 import type { Order, OrderStatus, PortalPayload } from './types';
 
 interface CustomerPortalAppProps {
@@ -144,13 +144,16 @@ function PortalView({
             <div className="portal-table-wrap">
               <table className="portal-table">
                 <thead>
-                  <tr><th>Store</th><th>Order</th><th>Placed</th><th>Purchase total</th><th>Fee basis</th><th>Service fee</th><th>Status</th><th>Tracking</th><th aria-label="Open order" /></tr>
+                  <tr><th>Store</th><th>Order</th><th>To alias</th><th>Ship to</th><th>Payment</th><th>Placed</th><th>Purchase total</th><th>Fee basis</th><th>Service fee</th><th>Status</th><th>Tracking</th><th aria-label="Open order" /></tr>
                 </thead>
                 <tbody>
                   {filteredOrders.map((order) => (
                     <tr key={order.id} className={selectedOrder?.id === order.id ? 'selected' : ''} onClick={() => onSelect(order.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect(order.id); }} tabIndex={0}>
                       <td><span className="portal-store-cell"><StoreMark store={order.store} /><span>{order.store}</span></span></td>
                       <td className="portal-order-number"><span>{order.orderNumber}</span>{order.trackingNumber && <small className="portal-order-tracking-inline">{order.carrier ?? 'Tracking'} · {maskTracking(order.trackingNumber)}</small>}</td>
+                      <OrderMetadataCell value={order.emailTo} />
+                      <OrderMetadataCell value={order.shippingAddress} />
+                      <OrderMetadataCell value={formatPaymentMethod(order.paymentMethodType, order.paymentLast4)} />
                       <td>{formatDate(order.orderedAt)}</td>
                       <td>{formatMoney(order.totalCents, order.currency)}</td>
                       <td><span className="portal-fee-cell">{formatMoney(order.feeBasisCents, order.currency)} <small>{order.feeBasis === 'checkout_total' ? 'Checkout total' : 'Custom amount'}</small></span></td>
@@ -193,6 +196,11 @@ function PortalOrderDetail({ order, onClose }: { order: Order; onClose: () => vo
     <aside className="portal-detail" aria-label={`Order ${order.orderNumber}`}>
       <div className="portal-detail-heading"><div><h2>Order #{order.orderNumber}</h2><span className={`portal-status ${order.status}`}>{portalStatusLabel(order.status)}</span></div><button className="portal-close" onClick={onClose} aria-label="Close order details"><X size={19} /></button></div>
       <div className="portal-detail-store"><StoreMark store={order.store} /><div><strong>{order.store}</strong><span>{formatDateTime(order.orderedAt)}</span></div></div>
+      <dl className="portal-order-metadata">
+        <div><dt>To alias</dt><dd>{order.emailTo ?? '—'}</dd></div>
+        <div><dt>Ship to</dt><dd>{order.shippingAddress ?? '—'}</dd></div>
+        <div><dt>Payment</dt><dd>{formatPaymentMethod(order.paymentMethodType, order.paymentLast4) ?? '—'}</dd></div>
+      </dl>
       <section className="portal-items-section" aria-labelledby="portal-items-title">
         <div className="portal-items-heading"><h3 id="portal-items-title">Items purchased</h3><span>{order.itemCount ? `${order.itemCount} ${order.itemCount === 1 ? 'item' : 'items'}` : 'Details pending'}</span></div>
         {order.items?.length ? (

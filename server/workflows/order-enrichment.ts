@@ -49,7 +49,14 @@ export class NoopOrderEnrichmentProvider implements OrderEnrichmentProvider {
  * AI adapters return unknown data on purpose. The workflow validates it before
  * any repository call, and only the normalized order is ever persisted.
  */
-export function validateEnrichedOrder(value: unknown, fallback: { messageKey: string; receivedAt: Date }): ParsedOrderEmail | null {
+export function validateEnrichedOrder(value: unknown, fallback: {
+  messageKey: string;
+  receivedAt: Date;
+  emailTo?: string | null;
+  shippingAddress?: string | null;
+  paymentMethodType?: string | null;
+  paymentLast4?: string | null;
+}): ParsedOrderEmail | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<ParsedOrderEmail>;
   if (typeof candidate.merchant !== 'string' || candidate.merchant.trim().length < 2) return null;
@@ -86,6 +93,10 @@ export function validateEnrichedOrder(value: unknown, fallback: { messageKey: st
     orderedAt,
     itemCount: items.length > 0 ? items.reduce((total, item) => total + item.quantity, 0) : candidate.itemCount ?? null,
     items,
+    emailTo: fallback.emailTo ?? null,
+    shippingAddress: fallback.shippingAddress ?? null,
+    paymentMethodType: fallback.paymentMethodType ?? null,
+    paymentLast4: fallback.paymentLast4 ?? null,
   };
 }
 

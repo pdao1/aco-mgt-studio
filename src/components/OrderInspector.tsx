@@ -1,7 +1,7 @@
 import { Copy, Eye, EyeOff, ExternalLink, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { FeeBasis, Order, OrderStatus, UpdateOrderFeeInput } from '../types';
-import { calculateFeeCents, formatDate, formatDateTime, formatMoney, formatPercent, maskTracking, titleCaseStatus } from '../lib/format';
+import { calculateFeeCents, formatDate, formatDateTime, formatMoney, formatPaymentMethod, formatPercent, maskTracking, titleCaseStatus } from '../lib/format';
 import { StoreMark } from './OrdersTable';
 
 interface OrderInspectorProps {
@@ -131,6 +131,9 @@ export function OrderInspector({ order, customerName, onClose, onFeeSave, onOver
         <div><dt>Purchase total</dt><dd>{formatMoney(order.totalCents, order.currency)}</dd></div>
         <div><dt>Items</dt><dd>{order.itemCount ?? '—'}</dd></div>
         <div><dt>Customer</dt><dd>{customerName}</dd></div>
+        <div><dt>To alias</dt><dd>{order.emailTo ?? '—'}</dd></div>
+        <div><dt>Ship to</dt><dd>{order.shippingAddress ?? '—'}</dd></div>
+        <div><dt>Payment</dt><dd>{formatPaymentMethod(order.paymentMethodType, order.paymentLast4) ?? '—'}</dd></div>
       </dl>
 
       <section className="order-items-section" aria-labelledby="order-items-title">

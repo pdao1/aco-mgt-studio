@@ -52,6 +52,10 @@ describe('parser feedback persistence', () => {
       expectedDelivery: null,
       orderedAt: new Date('2026-09-15T10:15:00.000Z'),
       itemCount: 2,
+      emailTo: 'Buyer <buyer+target@example.com>',
+      shippingAddress: '3600 Aolele St, Honolulu, HI 96820',
+      paymentMethodType: 'Visa',
+      paymentLast4: '4242',
       items: [
         { name: 'Pokémon Trading Card Game', quantity: 2, unitPriceCents: null, totalCents: null },
         { name: 'Delivers to', quantity: 2, unitPriceCents: null, totalCents: null },
@@ -66,6 +70,12 @@ describe('parser feedback persistence', () => {
     }, parsed);
     const dashboard = await repository.dashboard(workspaceId);
     orderId = dashboard.orders[0].id;
+    expect(dashboard.orders[0]).toMatchObject({
+      emailTo: 'Buyer <buyer+target@example.com>',
+      shippingAddress: '3600 Aolele St, Honolulu, HI 96820',
+      paymentMethodType: 'Visa',
+      paymentLast4: '4242',
+    });
   }, 30_000);
 
   afterAll(async () => {
@@ -111,6 +121,12 @@ describe('parser feedback persistence', () => {
     const dashboard = await repository.dashboard(workspaceId);
     expect(dashboard.orders).toHaveLength(1);
     expect(dashboard.orders[0]).toMatchObject({ id: orderId, isArchived: true, hiddenItemCount: 1 });
+    expect(dashboard.orders[0]).toMatchObject({
+      emailTo: 'Buyer <buyer+target@example.com>',
+      shippingAddress: '3600 Aolele St, Honolulu, HI 96820',
+      paymentMethodType: 'Visa',
+      paymentLast4: '4242',
+    });
     expect(new Date(dashboard.orders[0].orderedAt).toISOString()).toBe(email.receivedAt.toISOString());
 
     const repairMeta = { ...meta, messageKey: 'legacy-no-match' };

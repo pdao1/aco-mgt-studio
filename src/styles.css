@@ -816,7 +816,7 @@ tr:focus-visible {
 
 .orders-table {
   width: 100%;
-  min-width: 820px;
+  min-width: 1420px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -843,14 +843,19 @@ tr:focus-visible {
   font-weight: 600;
 }
 
-.orders-table th:nth-child(1) { width: 15%; }
-.orders-table th:nth-child(2) { width: 17%; }
-.orders-table th:nth-child(3) { width: 14%; }
-.orders-table th:nth-child(4) { width: 11%; }
-.orders-table th:nth-child(5) { width: 12%; }
-.orders-table th:nth-child(6) { width: 12%; }
-.orders-table th:nth-child(7) { width: 13%; }
-.orders-table th:nth-child(8) { width: 16%; }
+.orders-table th:nth-child(1) { width: 9%; }
+.orders-table th:nth-child(2) { width: 10%; }
+.orders-table th:nth-child(3) { width: 12%; }
+.orders-table th:nth-child(4) { width: 15%; }
+.orders-table th:nth-child(5) { width: 8%; }
+.orders-table th:nth-child(6) { width: 8%; }
+.orders-table th:nth-child(7) { width: 8%; }
+.orders-table th:nth-child(8) { width: 8%; }
+.orders-table th:nth-child(9) { width: 8%; }
+.orders-table th:nth-child(10) { width: 7%; }
+.orders-table th:nth-child(11) { width: 7%; }
+
+.order-metadata-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .orders-table td {
   color: var(--ink);
@@ -1103,7 +1108,7 @@ tr:focus-visible {
 }
 
 .order-facts dt { color: var(--muted); }
-.order-facts dd { display: flex; align-items: center; color: var(--ink); text-align: right; }
+.order-facts dd { display: flex; align-items: center; justify-content: flex-end; min-width: 0; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
 
 .order-items-section { padding: 23px 0 24px; border-bottom: 1px solid var(--line); }
 .order-items-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -2169,7 +2174,7 @@ tr:focus-visible {
 
 .portal-table {
   width: 100%;
-  min-width: 900px;
+  min-width: 1480px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -2187,15 +2192,18 @@ tr:focus-visible {
 
 .portal-table th { height: 43px; color: var(--muted); background: var(--surface); font-size: 10px; font-weight: 700; }
 .portal-table td { color: var(--ink); font-size: 11px; }
-.portal-table th:nth-child(1) { width: 13%; }
-.portal-table th:nth-child(2) { width: 14%; }
+.portal-table th:nth-child(1) { width: 8%; }
+.portal-table th:nth-child(2) { width: 9%; }
 .portal-table th:nth-child(3) { width: 11%; }
-.portal-table th:nth-child(4) { width: 12%; }
-.portal-table th:nth-child(5) { width: 14%; }
-.portal-table th:nth-child(6) { width: 11%; }
-.portal-table th:nth-child(7) { width: 11%; }
-.portal-table th:nth-child(8) { width: 11%; }
-.portal-table th:nth-child(9) { width: 3%; }
+.portal-table th:nth-child(4) { width: 16%; }
+.portal-table th:nth-child(5) { width: 9%; }
+.portal-table th:nth-child(6) { width: 7%; }
+.portal-table th:nth-child(7) { width: 7%; }
+.portal-table th:nth-child(8) { width: 8%; }
+.portal-table th:nth-child(9) { width: 8%; }
+.portal-table th:nth-child(10) { width: 7%; }
+.portal-table th:nth-child(11) { width: 8%; }
+.portal-table th:nth-child(12) { width: 2%; }
 .portal-table tbody tr { cursor: pointer; transition: background 120ms ease; }
 .portal-table tbody tr:hover { background: var(--surface-soft); }
 .portal-table tbody tr.selected { background: var(--surface-selected); }
@@ -2238,6 +2246,10 @@ tr:focus-visible {
 .portal-detail-store div { display: flex; flex-direction: column; gap: 5px; }
 .portal-detail-store strong { color: var(--ink); font-size: 14px; }
 .portal-detail-store span { color: var(--muted); font-size: 11px; }
+.portal-order-metadata { display: grid; gap: 12px; margin: 0 0 8px; padding: 0 0 20px; border-bottom: 1px solid var(--line); }
+.portal-order-metadata div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; font-size: 11px; }
+.portal-order-metadata dt { color: var(--muted); }
+.portal-order-metadata dd { min-width: 0; margin: 0; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
 .portal-items-section { padding: 0 0 20px; border-bottom: 1px solid var(--portal-line); }
 .portal-items-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .portal-items-heading h3 { margin: 0; color: var(--ink); font-size: 13px; }

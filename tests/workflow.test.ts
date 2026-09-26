@@ -64,6 +64,10 @@ describe('order enrichment boundary', () => {
       orderedAt: new Date('2026-08-20T12:00:00Z'),
       itemCount: null,
       items: [],
+      emailTo: null,
+      shippingAddress: null,
+      paymentMethodType: null,
+      paymentLast4: null,
     };
     let stored: ParsedOrderEmail | null = null;
     const repository = {
@@ -122,6 +126,10 @@ describe('order enrichment boundary', () => {
       orderedAt: new Date('2026-08-20T12:00:00Z'),
       itemCount: 1,
       items: [{ name: 'Pokémon Trading Card Game', quantity: 1, unitPriceCents: null, totalCents: null }],
+      emailTo: null,
+      shippingAddress: null,
+      paymentMethodType: null,
+      paymentLast4: null,
     };
     let reviewCalls = 0;
     const repository = {

@@ -1,5 +1,5 @@
 import type { ParsedOrderEmail, EmailInput } from '../email/parser.js';
-import { isCancellationNotice, isLikelyOrderMessage, isOneTimePinEmail } from '../email/parser.js';
+import { extractOrderMetadata, isCancellationNotice, isLikelyOrderMessage, isOneTimePinEmail } from '../email/parser.js';
 import type { ProcessedMessageMeta, Repository } from '../database/repository.js';
 import {
   buildRedactedEnrichmentInput,
@@ -143,7 +143,11 @@ export async function runOrderIngestion(
       console.warn(`[order-enrichment] order repair skipped provider=${enricher.name} reason=${safeErrorMessage(error)}`);
       return { matched: false, source: 'ai', validation: 'deferred' };
     }
-    const normalized = validateEnrichedOrder(enriched, { messageKey: meta.messageKey, receivedAt: meta.receivedAt });
+    const normalized = validateEnrichedOrder(enriched, {
+      messageKey: meta.messageKey,
+      receivedAt: meta.receivedAt,
+      ...extractOrderMetadata(email),
+    });
     if (normalized && isGroundedOrderNumber(normalized.orderNumber, email)) {
       const matched = await dependencies.repository.recordMessage(workspaceId, customerId, persistedMeta, normalized);
       return { matched, orderNumber: normalized.orderNumber, source: 'ai', validation: matched ? 'accepted' : 'skipped' };
